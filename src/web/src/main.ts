@@ -48,9 +48,12 @@ function shell(content: string) {
   app().innerHTML = `
     <div class="app-shell">
       <div class="topbar">
-        <div>
-          <h1>ShipRelease</h1>
-          <p>Automate unpaid order release into ShipStation</p>
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <h1>ShipRelease</h1>
+            <p>Automate unpaid order release into ShipStation</p>
+          </div>
         </div>
         <span class="badge">Works with ShipStation</span>
       </div>
@@ -66,6 +69,14 @@ function shell(content: string) {
 
 function metric(label: string, value: string, sub = "") {
   return `<section class="metric"><i></i><span>${label}</span><strong>${value}</strong>${sub ? `<small>${sub}</small>` : ""}</section>`;
+}
+
+function primaryMetric(label: string, value: string, sub = "") {
+  return `<section class="metric primary-metric"><span>${label}</span><strong>${value}</strong>${sub ? `<small>${sub}</small>` : ""}</section>`;
+}
+
+function summaryItem(label: string, value: string) {
+  return `<section><span>${label}</span><strong>${value}</strong></section>`;
 }
 
 function statusBadge(status: string) {
@@ -135,39 +146,31 @@ function dashboard(data: any) {
     </tr>
   `).join("");
   const shipstationStatus = data.shipstation?.connectionStatus || "missing";
-  const planStatus = `${data.plan?.name || "unknown"} / ${data.plan?.status || "inactive"}`;
+  const waitingImports = (data.importWaitingJobs || []).length;
   shell(`
     <section class="ops-hero ${data.automation?.paused ? "paused" : "active"}">
       <div class="ops-hero-copy">
-        <span class="eyebrow"><i></i> Operations Control Centre</span>
+        <span class="eyebrow">Operations overview</span>
         <h2>${data.automation?.paused ? "Automation paused" : "Automation active"}</h2>
-        <p>${data.automation?.paused ? "New releases are stopped. Queued work is deferred safely and audit logging stays active." : "Eligible orders are monitored, queued, and released into ShipStation with operational guardrails."}</p>
+        <p>${data.automation?.paused ? "New releases are stopped. Queued work is deferred safely and audit logging stays active." : `ShipStation is ${shipstationStatus.replaceAll("_", " ")}. Eligible orders can be released automatically when rules match.`}</p>
       </div>
       <div class="ops-hero-actions">
         ${data.automation?.paused ? `<button class="primary" type="button" id="resume-automation">Automation active</button>` : `<button class="quiet" type="button" id="pause-automation">Pause all releases</button>`}
         <button class="secondary" type="button" id="run-reconciliation">Run reconciliation</button>
       </div>
     </section>
-    <div class="status-strip">
-      <section>${statusBadge(data.automation?.paused ? "paused" : "active")}<strong>${data.automation?.paused ? "Paused" : "Active"}</strong><span>Automation</span></section>
-      <section>${statusBadge(shipstationStatus)}<strong>${shipstationStatus.replaceAll("_", " ")}</strong><span>ShipStation</span></section>
-      <section>${statusBadge(data.plan?.status || "inactive")}<strong>${planStatus}</strong><span>Managed plan</span></section>
-      <section>${statusBadge((data.importWaitingJobs || []).length ? "pending" : "success")}<strong>${(data.importWaitingJobs || []).length}</strong><span>Waiting imports</span></section>
-      <section>${statusBadge(data.metrics?.lastSuccessfulReleaseAt ? "success" : "info")}<strong>${compactWhen(data.metrics?.lastSuccessfulReleaseAt)}</strong><span>Last release</span></section>
+    <div class="grid metrics-grid overview-metrics">
+      ${primaryMetric("Releases today", String(data.metrics?.releasesToday || 0), "Completed since midnight")}
+      ${primaryMetric("Waiting for ShipStation", String(waitingImports), "Import wait jobs")}
+      ${primaryMetric("Needs attention", String(data.metrics?.failedNeedsAttention || 0), "Failed releases")}
     </div>
-    <div class="grid metrics-grid">
-      ${metric("Releases today", String(data.metrics?.releasesToday || 0))}
-      ${metric("Releases this month", String(data.metrics?.releasesThisMonth || 0))}
-      ${metric("Failed releases", String(data.metrics?.failedReleases || 0))}
-      ${metric("Pending queue jobs", String(data.metrics?.pendingQueueJobs || 0))}
-      ${metric("Plan usage", `${data.usage?.count || 0} / ${data.usage?.limit || 0}`, data.usage?.month || "")}
-      ${metric("Last webhook", when(data.metrics?.lastWebhookReceivedAt))}
-      ${metric("Last release", when(data.metrics?.lastSuccessfulReleaseAt))}
-      ${metric("Retries today", String(data.metrics?.retryCountToday || 0))}
-      ${metric("Needs attention", String(data.metrics?.failedNeedsAttention || 0))}
+    <div class="overview-summary">
+      ${summaryItem("Last webhook", when(data.metrics?.lastWebhookReceivedAt))}
+      ${summaryItem("Last release", compactWhen(data.metrics?.lastSuccessfulReleaseAt))}
+      ${summaryItem("Plan usage", `${data.usage?.count || 0} / ${data.usage?.limit || 0}`)}
     </div>
-    <section class="panel section-panel">
-      <div class="panel-heading"><div><h2>Queue health</h2><p>Current BullMQ and database queue state for release automation.</p></div>${statusBadge((data.metrics?.pendingQueueJobs || 0) > 0 ? "pending" : "success")}</div>
+    <section class="panel section-panel quiet-panel">
+      <div class="panel-heading"><div><h2>Queue health</h2><p>Current queue state for release automation.</p></div>${statusBadge((data.metrics?.pendingQueueJobs || 0) > 0 ? "pending" : "success")}</div>
       <div class="queue-grid">
         ${metric("Waiting", String(queue.waiting || 0))}
         ${metric("Delayed", String(queue.delayed || 0))}
@@ -454,12 +457,17 @@ function shipstation(data: any) {
 }
 
 function plans(data: any) {
+  const benefits: Record<string, string> = {
+    Starter: "For new stores validating manual-payment release automation.",
+    Pro: "For growing teams with steady daily order operations.",
+    Scale: "For high-volume teams that need more monthly capacity."
+  };
   const planRows = Object.entries(data.plans || {}).map(([name, limit]) => `
     <section class="plan-card ${String(data.currentPlan || "").toLowerCase() === String(name).toLowerCase() ? "current" : ""}">
-      <span>${name}</span>
-      ${String(data.currentPlan || "").toLowerCase() === String(name).toLowerCase() ? `<em>Current plan</em>` : ""}
+      <div class="plan-card-header"><span>${name}</span>${String(data.currentPlan || "").toLowerCase() === String(name).toLowerCase() ? `<em>Current plan</em>` : ""}</div>
       <strong>${Number(limit) === 0 ? "Custom" : Number(limit).toLocaleString()}</strong>
       <small>${Number(limit) === 0 ? "Contact support" : "releases/month"}</small>
+      <p>${benefits[String(name)] || "Managed through Shopify pricing."}</p>
     </section>
   `).join("");
   const inactivePlan = !data.currentPlan || data.currentPlan === "unknown" || data.planStatus !== "active";
@@ -471,11 +479,18 @@ function plans(data: any) {
   ` : "";
   shell(`
     ${pageIntro("Managed pricing", "ShipRelease reads subscription status from Shopify Managed Pricing. Billing is managed in Shopify.")}
-    <section class="panel">
+    <section class="panel plan-hero">
       <div class="panel-heading"><div><h2>Current plan</h2><p>Usage this month: ${data.usage?.count || 0} / ${data.allowance || 0}</p></div>${statusBadge(data.planStatus || "inactive")}</div>
       ${planNotice}
+      <div class="plan-cta">
+        <div>
+          <strong>${inactivePlan ? "Choose a plan to activate ShipRelease" : `You're on ${data.currentPlan}`}</strong>
+          <span>${inactivePlan ? "Select a Shopify Managed Pricing plan to start releasing orders." : "Manage billing, plan changes, and cancellation in Shopify."}</span>
+        </div>
+        <a class="button primary" href="${data.manageUrl}" target="_top">${inactivePlan ? "Choose a plan in Shopify" : "Manage plan in Shopify"}</a>
+      </div>
       <div class="plan-grid">${planRows}</div>
-      <div class="actions"><button class="secondary" type="button" id="refresh-plan">Refresh plan status</button><a class="button primary" href="${data.manageUrl}" target="_top">Manage plan in Shopify</a></div>
+      <div class="actions"><button class="secondary" type="button" id="refresh-plan">Refresh plan status</button></div>
     </section>
   `);
   document.querySelector<HTMLButtonElement>("#refresh-plan")!.onclick = async () => {
