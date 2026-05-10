@@ -7,7 +7,7 @@ export type ReleaseJob = {
   shopId: string;
 };
 
-export const RELEASE_QUEUE_NAME = "shiprelease:release-orders";
+export const RELEASE_QUEUE_NAME = "shiprelease-release-orders";
 
 export const redisConnection = env.REDIS_URL
   ? new Redis(env.REDIS_URL, { maxRetriesPerRequest: null })

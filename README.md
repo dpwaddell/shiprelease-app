@@ -46,7 +46,7 @@ docker compose build
 docker compose up -d
 ```
 
-The default compose file exposes `shiprelease-app` on port `3300` and runs `shiprelease-worker` against the isolated `shiprelease:release-orders` queue. PostgreSQL and Redis run as separate `shiprelease-db` and `shiprelease-redis` containers.
+The default compose file exposes `shiprelease-app` on port `3300` and runs `shiprelease-worker` against the isolated `shiprelease-release-orders` queue. PostgreSQL and Redis run as separate `shiprelease-db` and `shiprelease-redis` containers.
 
 ## Shopify
 
