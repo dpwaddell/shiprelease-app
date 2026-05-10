@@ -88,8 +88,9 @@ export async function queueReleaseFromOrder(input: {
   const retryCount = input.retryOfJobId
     ? await prisma.releaseJob.count({ where: { shopId: input.shopId, shopifyOrderId: orderId, retryOfJobId: { not: null } } })
     : 0;
+  const retryKeyPrefix = input.source === "manual_retry" ? "manual-retry" : `${input.source}-repair`;
   const idempotencyKey = input.retryOfJobId
-    ? `${input.shopId}:${orderId}:manual-retry:${input.retryOfJobId}:${retryCount + 1}`
+    ? `${input.shopId}:${orderId}:${retryKeyPrefix}:${input.retryOfJobId}:${retryCount + 1}`
     : `${input.shopId}:${orderId}:release-to-awaiting-shipment`;
 
   const releaseJob = await prisma.releaseJob.upsert({

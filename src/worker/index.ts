@@ -1,4 +1,4 @@
-import { Worker } from "bullmq";
+import { DelayedError, Worker, type Job } from "bullmq";
 import { prisma } from "../server/db.js";
 import { decryptSecret } from "../server/utils/crypto.js";
 import { billingMonth } from "../server/utils/shop.js";
@@ -44,7 +44,28 @@ async function maybeSendUsageWarnings(shopId: string) {
   }
 }
 
-async function processRelease(job: { data: ReleaseJob; attemptsMade: number }) {
+const PAUSED_RELEASE_DEFER_MINUTES = 15;
+
+async function deferPausedRelease(job: Job<ReleaseJob>, releaseJob: NonNullable<Awaited<ReturnType<typeof prisma.releaseJob.findUnique>>>) {
+  const runAt = new Date(Date.now() + PAUSED_RELEASE_DEFER_MINUTES * 60_000);
+  await prisma.releaseJob.update({
+    where: { id: releaseJob.id },
+    data: { status: "queued", failureReason: null }
+  });
+  await logReleaseEvent({
+    shopId: releaseJob.shopId,
+    orderId: releaseJob.shopifyOrderId,
+    orderName: releaseJob.shopifyOrderName,
+    eventType: "release_deferred",
+    status: "info",
+    message: "Automation is paused. Release job deferred without consuming retry attempts.",
+    metadata: { releaseJobId: releaseJob.id, deferredUntil: runAt.toISOString(), delayMinutes: PAUSED_RELEASE_DEFER_MINUTES }
+  });
+  await job.moveToDelayed(runAt.getTime(), job.token);
+  throw new DelayedError();
+}
+
+async function processRelease(job: Job<ReleaseJob>) {
   const releaseJob = await prisma.releaseJob.findUnique({
     where: { id: job.data.releaseJobId },
     include: { shop: { include: { shipstationCredentials: true, automationSettings: true } } }
@@ -67,6 +88,10 @@ async function processRelease(job: { data: ReleaseJob; attemptsMade: number }) {
     return;
   }
 
+  if (releaseJob.shop.automationSettings?.automationPaused) {
+    await deferPausedRelease(job, releaseJob);
+  }
+
   await prisma.releaseJob.update({
     where: { id: releaseJob.id },
     data: { status: job.attemptsMade > 0 ? "retrying" : "queued", attempts: job.attemptsMade + 1 }
@@ -84,7 +109,6 @@ async function processRelease(job: { data: ReleaseJob; attemptsMade: number }) {
   const credentials = releaseJob.shop.shipstationCredentials;
   if (!credentials) throw new Error("ShipStation credentials are missing");
   if (!releaseJob.shop.automationSettings?.enabled) throw new Error("Automation is disabled");
-  if (releaseJob.shop.automationSettings.automationPaused) throw new Error("Automation is paused");
 
   const auth = {
     apiKey: decryptSecret(credentials.encryptedApiKey),

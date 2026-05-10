@@ -6,6 +6,7 @@ export const RELEASE_EVENT_TYPES = [
   "queued_for_release",
   "payment_detected",
   "release_started",
+  "release_deferred",
   "release_success",
   "release_failed",
   "manual_release",

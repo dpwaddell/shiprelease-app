@@ -417,7 +417,17 @@ adminRouter.post("/reconcile/recent-orders", async (req, res) => {
       ignoredOrders += 1;
       continue;
     }
-    const result = await queueReleaseFromOrder({ shopId: shop.id, order, settings, source: "reconciliation" });
+    const failedJob = await prisma.releaseJob.findFirst({
+      where: { shopId: shop.id, shopifyOrderId: String(order.id), status: "failed" },
+      orderBy: { updatedAt: "desc" }
+    });
+    const result = await queueReleaseFromOrder({
+      shopId: shop.id,
+      order,
+      settings,
+      source: "reconciliation",
+      retryOfJobId: failedJob?.id
+    });
     if (result.queued) {
       queuedFixes += 1;
       fixes.push({ orderId: String(order.id), orderName: order.name, releaseJobId: result.releaseJob?.id });
