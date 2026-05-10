@@ -495,7 +495,7 @@ function plans(data: any) {
           <span>${inactivePlan ? "Select a Shopify Managed Pricing plan to start releasing orders." : "Manage billing, plan changes, and cancellation in Shopify."}</span>
           <small>You’ll be redirected to Shopify to confirm or manage your plan.</small>
         </div>
-        <a class="button primary" href="${data.manageUrl}" target="_top">${inactivePlan ? "Choose a plan in Shopify" : "Manage plan in Shopify"}</a>
+        <a class="button primary" href="${data.manageUrl}" target="_top" rel="noopener noreferrer">${inactivePlan ? "Choose a plan in Shopify" : "Manage plan in Shopify"}</a>
       </div>
       <div class="plan-grid">${planRows}</div>
       <div class="actions"><button class="secondary" type="button" id="refresh-plan">Refresh plan status</button></div>
@@ -532,8 +532,8 @@ function support(data: any) {
     <section class="panel support-card">
       <div class="panel-heading"><div><h2>How can we help?</h2><p>We include safe store details in the email so support can start with the right context.</p></div>${statusBadge(diag.automationEnabled ? "active" : "inactive")}</div>
       <div class="support-actions">
-        <a class="button primary" href="${supportHref}">Contact support</a>
-        <a class="button secondary" href="${featureHref}">Request a feature</a>
+        <a class="button primary" href="${supportHref}" target="_blank" rel="noopener noreferrer">Contact support</a>
+        <a class="button secondary" href="${featureHref}" target="_blank" rel="noopener noreferrer">Request a feature</a>
       </div>
       <dl class="support-summary">
         <div><dt>Shop domain</dt><dd>${diag.shopDomain}</dd></div>

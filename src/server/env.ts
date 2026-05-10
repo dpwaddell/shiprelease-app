@@ -6,6 +6,7 @@ dotenv.config();
 const schema = z.object({
   SHOPIFY_API_KEY: z.string().min(1),
   SHOPIFY_API_SECRET: z.string().min(1),
+  SHOPIFY_APP_HANDLE: z.string().trim().min(1).optional(),
   SHOPIFY_APP_URL: z.string().url(),
   SCOPES: z.string().default("read_orders"),
   DATABASE_URL: z.string().min(1),

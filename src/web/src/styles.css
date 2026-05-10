@@ -596,12 +596,12 @@ tbody tr:hover {
 .form {
   display: grid;
   gap: 16px;
-  max-width: 980px;
+  max-width: none;
 }
 
 .stacked-form {
   counter-reset: form-section;
-  max-width: 920px;
+  max-width: none;
   grid-template-columns: 1fr;
 }
 

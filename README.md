@@ -30,7 +30,23 @@ Configured webhook topics:
 
 Order webhooks are acknowledged quickly after HMAC validation. Processing then runs server-side and logs audit events. If Shopify misses a webhook or delivery is delayed, operators can run reconciliation from the dashboard.
 
-Compliance webhooks validate HMAC and write minimal audit records without exposing customer data.
+Compliance webhooks are registered in `shopify.app.toml` with a single app-specific subscription:
+
+```toml
+[[webhooks.subscriptions]]
+compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+uri = "/webhooks/compliance"
+```
+
+The explicit paths `/webhooks/customers/data_request`, `/webhooks/customers/redact`, and `/webhooks/shop/redact` are kept as compatibility aliases. Compliance webhooks validate HMAC with the raw request body and return `200` quickly after validation. Invalid HMAC requests return `401` and are not processed.
+
+After changing `shopify.app.toml`, deploy the app configuration to Shopify:
+
+```sh
+shopify app deploy
+```
+
+If the repository uses a named production app configuration, pass `--config <name>`. Shopify automated checks can continue to fail until the TOML changes are deployed to the Shopify app configuration, even when the production web app routes are already live.
 
 ## ShipStation Import Wait
 
@@ -207,6 +223,15 @@ Logs:
 ```sh
 docker compose logs --tail=100 shiprelease-app shiprelease-worker
 ```
+
+Webhook diagnostics:
+
+```sh
+npm run test:webhook
+npm run diagnose:webhooks
+```
+
+`test:webhook` exercises the local app by default. `diagnose:webhooks` uses `SHOPIFY_APP_URL` when set and sends valid and invalid HMAC requests to production webhook endpoints. It prints status codes only and never prints secrets.
 
 ## Validation Commands
 

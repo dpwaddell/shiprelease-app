@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
-import { env } from "../src/server/env.js";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 type WebhookCase = {
   path: string;
@@ -7,23 +9,38 @@ type WebhookCase = {
   body: string;
 };
 
+const appUrl = process.env.SHOPIFY_APP_URL?.trim().replace(/\/$/, "");
+const secret = process.env.SHOPIFY_API_SECRET;
+const diagnosticShop = "diagnostic-webhook-check.myshopify.com";
+
+if (!appUrl) {
+  console.log("SHOPIFY_APP_URL not set; production webhook diagnostic skipped.");
+  process.exit(0);
+}
+
+if (!appUrl.startsWith("https://")) {
+  throw new Error("SHOPIFY_APP_URL must be an HTTPS URL for production webhook diagnostics.");
+}
+
+if (!secret) {
+  throw new Error("SHOPIFY_API_SECRET is required for webhook diagnostics.");
+}
+
 const orderBody = JSON.stringify({
-  id: 1234567890,
-  name: "#1001",
-  order_number: 1001,
+  id: 9876543210,
+  name: "#DIAG",
+  order_number: 9876543210,
   financial_status: "pending",
-  gateway: "Bank Deposit",
+  gateway: "Diagnostic",
   tags: ""
 });
 
 const complianceBody = JSON.stringify({
-  shop_id: 123456,
-  shop_domain: process.argv[2] || "diagnostic-webhook-check.myshopify.com",
+  shop_id: 9876543210,
+  shop_domain: diagnosticShop,
   orders_requested: []
 });
 
-const baseUrl = (process.env.WEBHOOK_TEST_BASE_URL || "http://127.0.0.1:3300").replace(/\/$/, "");
-const shopDomain = process.argv[2] || "diagnostic-webhook-check.myshopify.com";
 const cases: WebhookCase[] = [
   { path: "/webhooks/orders", topic: "orders/create", body: orderBody },
   { path: "/webhooks/app/uninstalled", topic: "app/uninstalled", body: complianceBody },
@@ -36,17 +53,17 @@ const cases: WebhookCase[] = [
 ];
 
 function hmacFor(body: string) {
-  return crypto.createHmac("sha256", env.SHOPIFY_API_SECRET).update(body).digest("base64");
+  return crypto.createHmac("sha256", secret).update(body).digest("base64");
 }
 
 async function postWebhook(testCase: WebhookCase, hmac: string) {
-  return fetch(`${baseUrl}${testCase.path}`, {
+  return fetch(`${appUrl}${testCase.path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-Shopify-Hmac-Sha256": hmac,
       "X-Shopify-Topic": testCase.topic,
-      "X-Shopify-Shop-Domain": shopDomain
+      "X-Shopify-Shop-Domain": diagnosticShop
     },
     body: testCase.body
   });
@@ -56,14 +73,16 @@ let failures = 0;
 for (const testCase of cases) {
   const valid = await postWebhook(testCase, hmacFor(testCase.body));
   const invalid = await postWebhook(testCase, "invalid");
-  const validOk = valid.status === 200;
-  const invalidOk = invalid.status === 401;
-  console.log(`${testCase.path} ${testCase.topic}: valid=${valid.status} invalid=${invalid.status}`);
-  if (!validOk || !invalidOk) failures += 1;
   await valid.text().catch(() => undefined);
   await invalid.text().catch(() => undefined);
+
+  console.log(`${testCase.path} ${testCase.topic}: valid=${valid.status} invalid=${invalid.status}`);
+
+  if (valid.status !== 200 || invalid.status !== 401) {
+    failures += 1;
+  }
 }
 
 if (failures > 0) {
-  throw new Error(`Webhook verification failed for ${failures} case${failures === 1 ? "" : "s"}`);
+  throw new Error(`Production webhook diagnostic failed for ${failures} case${failures === 1 ? "" : "s"}.`);
 }
