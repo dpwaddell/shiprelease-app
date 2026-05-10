@@ -23,6 +23,7 @@ model Shop {
   automationSettings           AutomationSetting?
   shipstationCredentials       ShipStationCredential?
   releaseEvents                ReleaseEvent[]
+  releaseJobs                  ReleaseJob[]
   usageCounters                UsageCounter[]
   appEvents                    AppEvent[]
 
@@ -54,6 +55,11 @@ model AutomationSetting {
   includeTags         Json     @default("[]") @map("include_tags")
   excludeTags         Json     @default("[\"sampleguard:hold\",\"fraud\",\"review\"]") @map("exclude_tags")
   releaseDelayMinutes Int      @default(0) @map("release_delay_minutes")
+  releaseOnlyFullyPaid Boolean @default(false) @map("release_only_fully_paid")
+  delayMinutes        Int      @default(0) @map("delay_minutes")
+  ignoreHighRiskOrders Boolean @default(true) @map("ignore_high_risk_orders")
+  requireManualReviewAboveAmount Boolean @default(false) @map("require_manual_review_above_amount")
+  manualReviewAmount  Decimal  @default(0) @map("manual_review_amount") @db.Decimal(12, 2)
   notificationEmail   String?  @map("notification_email")
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
@@ -63,6 +69,24 @@ model AutomationSetting {
 }
 
 model ReleaseEvent {
+  id        String   @id @default(cuid())
+  shopId    String   @map("shop_id")
+  orderId   String   @map("order_id")
+  orderName String?  @map("order_name")
+  eventType String   @map("event_type")
+  status    String
+  message   String
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, createdAt])
+  @@index([shopId, status])
+  @@index([shopId, eventType])
+  @@map("release_events")
+}
+
+model ReleaseJob {
   id                     String    @id @default(cuid())
   shopId                 String    @map("shop_id")
   shopifyOrderId         String    @map("shopify_order_id")
@@ -83,7 +107,7 @@ model ReleaseEvent {
 
   @@index([shopId, createdAt])
   @@index([shopId, status])
-  @@map("release_events")
+  @@map("release_jobs")
 }
 
 model UsageCounter {

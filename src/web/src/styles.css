@@ -31,6 +31,10 @@ h1 {
   font-size: 24px;
 }
 
+h2 {
+  font-size: 18px;
+}
+
 .topbar p {
   margin-top: 4px;
   color: #6d7175;
@@ -104,11 +108,20 @@ main {
   color: #6d7175;
 }
 
+.helper {
+  color: #6d7175;
+  margin-bottom: 4px;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 16px;
   margin-bottom: 16px;
+}
+
+.metrics-grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
 
 .metric, .panel {
@@ -129,6 +142,74 @@ main {
 
 .metric strong {
   font-size: 28px;
+}
+
+.panel {
+  margin-bottom: 16px;
+}
+
+.panel-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.panel-heading p {
+  margin-top: 4px;
+  color: #6d7175;
+}
+
+.progress {
+  height: 8px;
+  margin: 16px 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e4e5e7;
+}
+
+.progress span {
+  display: block;
+  height: 100%;
+  background: #008060;
+}
+
+.checklist {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.checklist li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: #6d7175;
+}
+
+.checklist span {
+  display: inline-flex;
+  width: 40px;
+  min-height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #e4e5e7;
+  color: #6d7175;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.checklist .complete {
+  color: #202223;
+}
+
+.checklist .complete span {
+  background: #f1f8f5;
+  color: #007f5f;
 }
 
 table {
@@ -198,18 +279,66 @@ textarea {
   color: #007f5f;
 }
 
+.status.success {
+  background: #f1f8f5;
+  color: #007f5f;
+}
+
 .status.failed {
   background: #fff4f4;
   color: #d72c0d;
 }
 
-.status.queued, .status.retrying {
+.status.queued, .status.retrying, .status.pending, .status.info {
   background: #fff5ea;
   color: #8a6116;
 }
 
 .error {
   color: #d72c0d;
+}
+
+.empty-state {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 24px;
+  border: 1px dashed #babfc3;
+  border-radius: 8px;
+  color: #6d7175;
+  text-align: center;
+}
+
+.empty-state strong {
+  color: #202223;
+}
+
+.skeleton {
+  display: grid;
+  gap: 12px;
+}
+
+.skeleton span {
+  height: 18px;
+  max-width: 760px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #f1f2f3, #e4e5e7, #f1f2f3);
+}
+
+.skeleton span:nth-child(2) {
+  max-width: 620px;
+}
+
+.skeleton span:nth-child(3) {
+  max-width: 480px;
+}
+
+pre {
+  overflow: auto;
+  margin: 16px 0 0;
+  padding: 12px;
+  border-radius: 6px;
+  background: #f6f6f7;
 }
 
 dl {

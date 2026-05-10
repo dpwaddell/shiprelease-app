@@ -8,6 +8,9 @@ import { getPlanUsage, planLimit, PLAN_LIMITS } from "../services/plans.js";
 import { syncManagedPricing } from "../services/shopify.js";
 import { testShipStationConnection } from "../services/shipstation.js";
 import { sendNotification } from "../services/notifications.js";
+import { releaseQueue } from "../queue/releaseQueue.js";
+import { evaluateOrderEligibility, evaluateRuleFoundation, orderGateway } from "../services/eligibility.js";
+import { logReleaseEvent } from "../services/releaseEvents.js";
 
 export const adminRouter = express.Router();
 
@@ -27,7 +30,22 @@ const automationSchema = z.object({
   includeTags: z.array(z.string()).default([]),
   excludeTags: z.array(z.string()).default(["sampleguard:hold", "fraud", "review"]),
   releaseDelayMinutes: z.union([z.literal(0), z.literal(5), z.literal(15), z.literal(60)]),
+  releaseOnlyFullyPaid: z.boolean().default(false),
+  delayMinutes: z.number().int().min(0).max(1440).default(0),
+  ignoreHighRiskOrders: z.boolean().default(true),
+  requireManualReviewAboveAmount: z.boolean().default(false),
+  manualReviewAmount: z.number().min(0).max(999999).default(0),
   notificationEmail: z.string().email().or(z.literal("")).nullable().optional()
+});
+
+const simulatorSchema = z.object({
+  orderId: z.string().trim().min(1).max(80),
+  orderName: z.string().trim().max(80).optional(),
+  financialStatus: z.string().trim().max(40).default("pending"),
+  gateway: z.string().trim().max(120).default("Manual Payment"),
+  tags: z.string().trim().max(500).default(""),
+  totalPrice: z.number().min(0).max(999999).default(0),
+  riskLevel: z.string().trim().max(40).default("low")
 });
 
 function maskApiKey(apiKey: string) {
@@ -65,23 +83,66 @@ async function planStatus(shopId: string) {
   };
 }
 
+function serializeAutomation(settings: {
+  enabled: boolean;
+  financialStatuses: unknown;
+  paymentMethods: unknown;
+  includeTags: unknown;
+  excludeTags: unknown;
+  releaseDelayMinutes: number;
+  releaseOnlyFullyPaid: boolean;
+  delayMinutes: number;
+  ignoreHighRiskOrders: boolean;
+  requireManualReviewAboveAmount: boolean;
+  manualReviewAmount: unknown;
+  notificationEmail: string | null;
+}) {
+  return {
+    ...settings,
+    manualReviewAmount: Number(settings.manualReviewAmount || 0)
+  };
+}
+
 adminRouter.get("/dashboard", async (req, res) => {
   const shop = req.shop!;
-  const [usage, released, failed, recent] = await Promise.all([
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const startOfMonth = new Date(`${billingMonth()}-01T00:00:00.000Z`);
+  const [usage, releasesToday, releasesThisMonth, failedReleases, pendingQueueJobs, recentActivity, settings, credentials, firstRelease] = await Promise.all([
     getPlanUsage(shop.id, shop.planName),
-    prisma.releaseEvent.count({ where: { shopId: shop.id, status: "released", createdAt: { gte: new Date(`${billingMonth()}-01T00:00:00.000Z`) } } }),
+    prisma.releaseEvent.count({ where: { shopId: shop.id, eventType: "release_success", status: "success", createdAt: { gte: startOfToday } } }),
+    prisma.releaseEvent.count({ where: { shopId: shop.id, eventType: "release_success", status: "success", createdAt: { gte: startOfMonth } } }),
     prisma.releaseEvent.count({ where: { shopId: shop.id, status: "failed" } }),
-    prisma.releaseEvent.findMany({ where: { shopId: shop.id }, orderBy: { createdAt: "desc" }, take: 20 })
+    prisma.releaseJob.count({ where: { shopId: shop.id, status: { in: ["queued", "retrying"] } } }),
+    prisma.releaseEvent.findMany({
+      where: { shopId: shop.id },
+      orderBy: { createdAt: "desc" },
+      take: 25,
+      select: { id: true, orderId: true, orderName: true, eventType: true, status: true, message: true, createdAt: true }
+    }),
+    prisma.automationSetting.findUnique({ where: { shopId: shop.id } }),
+    prisma.shipStationCredential.findUnique({ where: { shopId: shop.id } }),
+    prisma.releaseEvent.findFirst({ where: { shopId: shop.id, eventType: "release_success", status: "success" }, select: { id: true } })
   ]);
-  const totalFinished = await prisma.releaseEvent.count({ where: { shopId: shop.id, status: { in: ["released", "failed"] } } });
-  const totalReleased = await prisma.releaseEvent.count({ where: { shopId: shop.id, status: "released" } });
+  const queueCounts = releaseQueue ? await releaseQueue.getJobCounts("waiting", "delayed", "active", "failed").catch(() => null) : null;
+  const checklist = [
+    { label: "App installed", complete: !shop.uninstalledAt },
+    { label: "ShipStation connected", complete: credentials?.connectionStatus === "connected" },
+    { label: "Pricing plan selected", complete: shop.planName !== "unknown" && shop.planStatus === "active" },
+    { label: "Automation enabled", complete: Boolean(settings?.enabled) },
+    { label: "First release completed", complete: Boolean(firstRelease) }
+  ];
+  const completed = checklist.filter((item) => item.complete).length;
   res.json({
-    releasesThisMonth: released,
+    metrics: {
+      releasesToday,
+      releasesThisMonth,
+      failedReleases,
+      pendingQueueJobs: queueCounts ? queueCounts.waiting + queueCounts.delayed + queueCounts.active : pendingQueueJobs
+    },
     usage: { count: usage.count, limit: usage.limit, month: usage.month },
-    estimatedSecondsSaved: released * 30,
-    successRate: totalFinished ? Math.round((totalReleased / totalFinished) * 1000) / 10 : 100,
-    failedReleases: failed,
-    recent
+    onboarding: { percent: Math.round((completed / checklist.length) * 100), checklist },
+    recentActivity
   });
 });
 
@@ -91,18 +152,66 @@ adminRouter.get("/automation", async (req, res) => {
     update: {},
     create: { shopId: req.shop!.id }
   });
-  res.json(settings);
+  res.json(serializeAutomation(settings));
 });
 
 adminRouter.put("/automation", async (req, res) => {
   const input = automationSchema.parse(req.body);
+  const delayMinutes = input.delayMinutes || input.releaseDelayMinutes;
   const settings = await prisma.automationSetting.upsert({
     where: { shopId: req.shop!.id },
-    update: { ...input, notificationEmail: input.notificationEmail || null },
-    create: { shopId: req.shop!.id, ...input, notificationEmail: input.notificationEmail || null }
+    update: { ...input, delayMinutes, notificationEmail: input.notificationEmail || null },
+    create: { shopId: req.shop!.id, ...input, delayMinutes, notificationEmail: input.notificationEmail || null }
   });
   await prisma.appEvent.create({ data: { shopId: req.shop!.id, eventType: "automation_saved", message: "Automation settings saved" } });
-  res.json(settings);
+  res.json(serializeAutomation(settings));
+});
+
+adminRouter.post("/simulator", async (req, res) => {
+  const input = simulatorSchema.parse(req.body);
+  const settings = await prisma.automationSetting.upsert({
+    where: { shopId: req.shop!.id },
+    update: {},
+    create: { shopId: req.shop!.id }
+  });
+  const order = {
+    id: input.orderId,
+    name: input.orderName || input.orderId,
+    financial_status: input.financialStatus,
+    gateway: input.gateway,
+    tags: input.tags,
+    total_price: input.totalPrice,
+    risk_level: input.riskLevel
+  };
+  const eligibility = evaluateOrderEligibility(order, settings);
+  const foundation = evaluateRuleFoundation(order, settings);
+  const wouldRelease = eligibility.eligible && foundation.passed;
+  await logReleaseEvent({
+    shopId: req.shop!.id,
+    orderId: input.orderId,
+    orderName: order.name,
+    eventType: "manual_release",
+    status: "info",
+    message: `Dry run simulated for ${order.name}.`,
+    metadata: { dryRun: true, wouldRelease }
+  });
+  res.json({
+    dryRun: true,
+    webhookDetected: true,
+    queueJobCreated: wouldRelease,
+    ruleEvaluation: {
+      eligible: eligibility.eligible,
+      reason: eligibility.reason,
+      foundation
+    },
+    decision: wouldRelease ? "would_release" : "would_block",
+    shipStationPayloadPreview: wouldRelease ? {
+      action: "restorefromhold",
+      lookupCandidates: [order.name, String(order.id)].filter(Boolean),
+      orderNumber: order.name,
+      gateway: orderGateway(order)
+    } : null
+  });
 });
 
 adminRouter.get("/shipstation", async (req, res) => {

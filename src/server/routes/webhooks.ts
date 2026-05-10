@@ -4,6 +4,7 @@ import { verifyShopifyWebhook } from "../utils/hmac.js";
 import { normalizeShopDomain } from "../utils/shop.js";
 import { evaluateOrderEligibility, orderGateway } from "../services/eligibility.js";
 import { enqueueRelease } from "../queue/releaseQueue.js";
+import { logReleaseEvent } from "../services/releaseEvents.js";
 
 export const webhookRouter = express.Router();
 
@@ -26,10 +27,41 @@ webhookRouter.post("/orders", async (req, res) => {
     });
     const idempotencyKey = `${shop.id}:${order.id}:release-to-awaiting-shipment`;
     const result = evaluateOrderEligibility(order, settings);
-    const existing = await prisma.releaseEvent.findUnique({ where: { idempotencyKey } });
-    if (existing && existing.status !== "skipped") return;
+    await logReleaseEvent({
+      shopId: shop.id,
+      orderId: String(order.id),
+      orderName: order.name,
+      eventType: "hold_detected",
+      status: "info",
+      message: `Webhook detected ${order.name || order.id}.`,
+      metadata: { financialStatus: order.financial_status, gateway: orderGateway(order) }
+    });
+    if (String(order.financial_status || "").toLowerCase() === "paid") {
+      await logReleaseEvent({
+        shopId: shop.id,
+        orderId: String(order.id),
+        orderName: order.name,
+        eventType: "payment_detected",
+        status: "info",
+        message: `Payment detected for ${order.name || order.id}.`,
+        metadata: { financialStatus: order.financial_status }
+      });
+    }
+    const existing = await prisma.releaseJob.findUnique({ where: { idempotencyKey } });
+    if (existing && existing.status !== "skipped") {
+      await logReleaseEvent({
+        shopId: shop.id,
+        orderId: String(order.id),
+        orderName: order.name,
+        eventType: "ignored",
+        status: "info",
+        message: "Order already has an active release job.",
+        metadata: { releaseJobId: existing.id, status: existing.status }
+      });
+      return;
+    }
 
-    const event = await prisma.releaseEvent.upsert({
+    const releaseJob = await prisma.releaseJob.upsert({
       where: { idempotencyKey },
       update: result.eligible ? {
         status: "queued",
@@ -53,7 +85,17 @@ webhookRouter.post("/orders", async (req, res) => {
       }
     });
 
-    if (result.eligible) await enqueueRelease({ releaseEventId: event.id, shopId: shop.id }, settings.releaseDelayMinutes);
+    await logReleaseEvent({
+      shopId: shop.id,
+      orderId: String(order.id),
+      orderName: order.name,
+      eventType: result.eligible ? "queued_for_release" : "ignored",
+      status: result.eligible ? "pending" : "info",
+      message: result.eligible ? "Order queued for ShipStation release." : result.reason || "Order ignored by automation rules.",
+      metadata: { releaseJobId: releaseJob.id, delayMinutes: settings.releaseDelayMinutes }
+    });
+
+    if (result.eligible) await enqueueRelease({ releaseJobId: releaseJob.id, shopId: shop.id }, settings.releaseDelayMinutes);
   } catch (error) {
     await prisma.appEvent.create({
       data: {

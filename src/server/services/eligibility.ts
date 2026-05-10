@@ -6,6 +6,10 @@ type OrderLike = {
   gateway?: string;
   payment_gateway_names?: string[];
   tags?: string;
+  total_price?: string | number;
+  totalPrice?: string | number;
+  risk_level?: string;
+  riskLevel?: string;
 };
 
 type Settings = {
@@ -15,6 +19,10 @@ type Settings = {
   includeTags: unknown;
   excludeTags: unknown;
   releaseDelayMinutes: number;
+  releaseOnlyFullyPaid?: boolean;
+  ignoreHighRiskOrders?: boolean;
+  requireManualReviewAboveAmount?: boolean;
+  manualReviewAmount?: unknown;
 };
 
 function list(value: unknown): string[] {
@@ -30,6 +38,47 @@ function tags(order: OrderLike): string[] {
 
 export function orderGateway(order: OrderLike) {
   return order.gateway || order.payment_gateway_names?.join(", ") || "";
+}
+
+function amount(value: unknown) {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export function evaluateRuleFoundation(order: OrderLike, settings: Settings) {
+  const checks: Array<{ name: string; passed: boolean; message: string }> = [];
+  const financialStatus = String(order.financial_status || "").toLowerCase();
+  if (settings.releaseOnlyFullyPaid) {
+    checks.push({
+      name: "releaseOnlyFullyPaid",
+      passed: financialStatus === "paid",
+      message: financialStatus === "paid" ? "Order is fully paid." : "Order is not fully paid."
+    });
+  }
+
+  const riskLevel = String(order.risk_level || order.riskLevel || "").toLowerCase();
+  if (settings.ignoreHighRiskOrders) {
+    checks.push({
+      name: "ignoreHighRiskOrders",
+      passed: riskLevel !== "high",
+      message: riskLevel === "high" ? "High risk orders require review." : "No high risk signal detected."
+    });
+  }
+
+  if (settings.requireManualReviewAboveAmount) {
+    const orderAmount = amount(order.total_price ?? order.totalPrice);
+    const threshold = amount(settings.manualReviewAmount);
+    checks.push({
+      name: "requireManualReviewAboveAmount",
+      passed: !threshold || orderAmount <= threshold,
+      message: threshold && orderAmount > threshold ? `Order total exceeds ${threshold}.` : "Order total is below manual review threshold."
+    });
+  }
+
+  return {
+    passed: checks.every((check) => check.passed),
+    checks
+  };
 }
 
 export function evaluateOrderEligibility(order: OrderLike, settings: Settings) {

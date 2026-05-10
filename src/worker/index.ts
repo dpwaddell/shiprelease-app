@@ -6,6 +6,7 @@ import { RELEASE_QUEUE_NAME, redisConnection, type ReleaseJob } from "../server/
 import { locateShipStationOrder, orderCandidates, releaseShipStationOrder } from "../server/services/shipstation.js";
 import { getPlanUsage } from "../server/services/plans.js";
 import { sendNotification } from "../server/services/notifications.js";
+import { logReleaseEvent } from "../server/services/releaseEvents.js";
 
 if (!redisConnection) throw new Error("REDIS_URL is required to start the ShipRelease worker");
 
@@ -44,36 +45,53 @@ async function maybeSendUsageWarnings(shopId: string) {
 }
 
 async function processRelease(job: { data: ReleaseJob; attemptsMade: number }) {
-  const event = await prisma.releaseEvent.findUnique({
-    where: { id: job.data.releaseEventId },
+  const releaseJob = await prisma.releaseJob.findUnique({
+    where: { id: job.data.releaseJobId },
     include: { shop: { include: { shipstationCredentials: true, automationSettings: true } } }
   });
-  if (!event) return;
-  if (event.status === "released") return;
-  if (event.shop.uninstalledAt) {
-    await prisma.releaseEvent.update({
-      where: { id: event.id },
+  if (!releaseJob) return;
+  if (releaseJob.status === "released") return;
+  if (releaseJob.shop.uninstalledAt) {
+    await prisma.releaseJob.update({
+      where: { id: releaseJob.id },
       data: { status: "skipped", skipReason: "Shop is uninstalled", attempts: job.attemptsMade }
+    });
+    await logReleaseEvent({
+      shopId: releaseJob.shopId,
+      orderId: releaseJob.shopifyOrderId,
+      orderName: releaseJob.shopifyOrderName,
+      eventType: "ignored",
+      status: "info",
+      message: "Shop is uninstalled."
     });
     return;
   }
 
-  await prisma.releaseEvent.update({
-    where: { id: event.id },
+  await prisma.releaseJob.update({
+    where: { id: releaseJob.id },
     data: { status: job.attemptsMade > 0 ? "retrying" : "queued", attempts: job.attemptsMade + 1 }
   });
+  await logReleaseEvent({
+    shopId: releaseJob.shopId,
+    orderId: releaseJob.shopifyOrderId,
+    orderName: releaseJob.shopifyOrderName,
+    eventType: "release_started",
+    status: "pending",
+    message: "Release worker started ShipStation release.",
+    metadata: { attempt: job.attemptsMade + 1 }
+  });
 
-  const credentials = event.shop.shipstationCredentials;
+  const credentials = releaseJob.shop.shipstationCredentials;
   if (!credentials) throw new Error("ShipStation credentials are missing");
-  if (!event.shop.automationSettings?.enabled) throw new Error("Automation is disabled");
+  if (!releaseJob.shop.automationSettings?.enabled) throw new Error("Automation is disabled");
 
   const auth = {
     apiKey: decryptSecret(credentials.encryptedApiKey),
     apiSecret: decryptSecret(credentials.encryptedApiSecret)
   };
   const candidates = orderCandidates({
-    id: event.shopifyOrderId,
-    name: event.shopifyOrderName
+    id: releaseJob.shopifyOrderId,
+    name: releaseJob.shopifyOrderName
   });
   const shipstationOrder = await locateShipStationOrder(auth, candidates);
   if (!shipstationOrder) throw new Error(`No matching ShipStation order found for ${candidates.join(", ")}`);
@@ -81,8 +99,8 @@ async function processRelease(job: { data: ReleaseJob; attemptsMade: number }) {
   await releaseShipStationOrder(auth, shipstationOrder.orderId);
   const month = billingMonth();
   await prisma.$transaction([
-    prisma.releaseEvent.update({
-      where: { id: event.id },
+    prisma.releaseJob.update({
+      where: { id: releaseJob.id },
       data: {
         status: "released",
         shipstationOrderId: String(shipstationOrder.orderId),
@@ -91,20 +109,29 @@ async function processRelease(job: { data: ReleaseJob; attemptsMade: number }) {
       }
     }),
     prisma.usageCounter.upsert({
-      where: { shopId_billingMonth: { shopId: event.shopId, billingMonth: month } },
+      where: { shopId_billingMonth: { shopId: releaseJob.shopId, billingMonth: month } },
       update: { releaseCount: { increment: 1 } },
-      create: { shopId: event.shopId, billingMonth: month, releaseCount: 1 }
+      create: { shopId: releaseJob.shopId, billingMonth: month, releaseCount: 1 }
     }),
     prisma.appEvent.create({
       data: {
-        shopId: event.shopId,
+        shopId: releaseJob.shopId,
         eventType: "order_released",
-        message: `Released ${event.shopifyOrderName || event.shopifyOrderId} into ShipStation workflow`,
+        message: `Released ${releaseJob.shopifyOrderName || releaseJob.shopifyOrderId} into ShipStation workflow`,
         metadata: { shipstationOrderId: shipstationOrder.orderId }
       }
     })
   ]);
-  await maybeSendUsageWarnings(event.shopId);
+  await logReleaseEvent({
+    shopId: releaseJob.shopId,
+    orderId: releaseJob.shopifyOrderId,
+    orderName: releaseJob.shopifyOrderName,
+    eventType: "release_success",
+    status: "success",
+    message: `Released ${releaseJob.shopifyOrderName || releaseJob.shopifyOrderId} into ShipStation workflow.`,
+    metadata: { shipstationOrderId: shipstationOrder.orderId }
+  });
+  await maybeSendUsageWarnings(releaseJob.shopId);
 }
 
 const worker = new Worker<ReleaseJob>(
@@ -116,25 +143,36 @@ const worker = new Worker<ReleaseJob>(
 worker.on("failed", async (job, error) => {
   if (!job) return;
   const willRetry = job.attemptsMade < (job.opts.attempts || 1);
-  await prisma.releaseEvent.updateMany({
-    where: { id: job.data.releaseEventId, status: { not: "released" } },
+  await prisma.releaseJob.updateMany({
+    where: { id: job.data.releaseJobId, status: { not: "released" } },
     data: {
       status: willRetry ? "retrying" : "failed",
       failureReason: error.message,
       attempts: job.attemptsMade
     }
   });
-  const event = await prisma.releaseEvent.findUnique({
-    where: { id: job.data.releaseEventId },
+  const releaseJob = await prisma.releaseJob.findUnique({
+    where: { id: job.data.releaseJobId },
     include: { shop: { include: { automationSettings: true } } }
   });
-  if (event && !willRetry) {
+  if (releaseJob) {
+    await logReleaseEvent({
+      shopId: releaseJob.shopId,
+      orderId: releaseJob.shopifyOrderId,
+      orderName: releaseJob.shopifyOrderName,
+      eventType: willRetry ? "retry_scheduled" : "release_failed",
+      status: willRetry ? "pending" : "failed",
+      message: willRetry ? "Release failed and will retry." : error.message,
+      metadata: { attemptsMade: job.attemptsMade }
+    });
+  }
+  if (releaseJob && !willRetry) {
     await sendNotification({
-      shopId: event.shopId,
-      to: event.shop.automationSettings?.notificationEmail,
+      shopId: releaseJob.shopId,
+      to: releaseJob.shop.automationSettings?.notificationEmail,
       eventType: "release_failed",
       subject: "ShipRelease order release failed",
-      text: `ShipRelease could not release ${event.shopifyOrderName || event.shopifyOrderId} for ${event.shop.domain}.\n\n${error.message}`
+      text: `ShipRelease could not release ${releaseJob.shopifyOrderName || releaseJob.shopifyOrderId} for ${releaseJob.shop.domain}.\n\n${error.message}`
     });
   }
 });
