@@ -13,7 +13,7 @@ const app = express();
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const webDist = path.resolve(dirname, "../../src/web/dist");
 
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(helmet({ contentSecurityPolicy: false, frameguard: false }));
 app.use(compression());
 app.use(cookieParser());
 
