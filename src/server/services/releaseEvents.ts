@@ -11,6 +11,7 @@ export const RELEASE_EVENT_TYPES = [
   "shipstation_import_timeout",
   "release_success",
   "release_failed",
+  "demo_release_candidate",
   "manual_release",
   "manual_retry",
   "retry_scheduled",

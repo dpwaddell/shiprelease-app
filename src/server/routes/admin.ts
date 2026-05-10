@@ -12,6 +12,7 @@ import { releaseQueue } from "../queue/releaseQueue.js";
 import { evaluateOrderEligibility, evaluateRuleFoundation, orderGateway } from "../services/eligibility.js";
 import { logReleaseEvent } from "../services/releaseEvents.js";
 import { hasActiveReleaseJob, queueReleaseFromOrder } from "../services/releaseOrchestration.js";
+import { demoConfig, isDemoReleaseCandidate } from "../services/demoMode.js";
 
 export const adminRouter = express.Router();
 
@@ -22,6 +23,7 @@ type ShipStationCredentialSummary = {
   lastSuccessAt?: Date | null;
   lastFailureReason?: string | null;
   apiKeyPreview?: string | null;
+  demo?: { enabled: boolean; tag: string };
 };
 
 const automationSchema = z.object({
@@ -67,13 +69,26 @@ function shipStationCredentialSummary(credentials: {
   lastSuccessAt: Date | null;
   lastFailureReason: string | null;
 } | null): ShipStationCredentialSummary {
+  const demo = demoConfig();
+  if (demo.enabled) {
+    return {
+      configured: true,
+      connectionStatus: "demo_connected",
+      lastCheckedAt: null,
+      lastSuccessAt: null,
+      lastFailureReason: null,
+      apiKeyPreview: "demo connection",
+      demo
+    };
+  }
   return {
     configured: Boolean(credentials),
     connectionStatus: credentials?.connectionStatus || "missing",
     lastCheckedAt: credentials?.lastCheckedAt,
     lastSuccessAt: credentials?.lastSuccessAt,
     lastFailureReason: credentials?.lastFailureReason,
-    apiKeyPreview: credentials ? maskApiKey(decryptSecret(credentials.encryptedApiKey)) : null
+    apiKeyPreview: credentials ? maskApiKey(decryptSecret(credentials.encryptedApiKey)) : null,
+    demo
   };
 }
 
@@ -126,6 +141,7 @@ function serializeAutomation(settings: {
 
 adminRouter.get("/dashboard", async (req, res) => {
   const shop = req.shop!;
+  const demo = demoConfig();
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
   const startOfMonth = new Date(`${billingMonth()}-01T00:00:00.000Z`);
@@ -194,7 +210,7 @@ adminRouter.get("/dashboard", async (req, res) => {
   }));
   const checklist = [
     { label: "App installed", complete: !shop.uninstalledAt },
-    { label: "ShipStation connected", complete: credentials?.connectionStatus === "connected" },
+    { label: "ShipStation connected", complete: demo.enabled || credentials?.connectionStatus === "connected" },
     { label: "Pricing plan selected", complete: shop.planName !== "unknown" && shop.planStatus === "active" },
     { label: "Automation enabled", complete: Boolean(settings?.enabled) },
     { label: "First release completed", complete: Boolean(firstRelease) }
@@ -220,10 +236,12 @@ adminRouter.get("/dashboard", async (req, res) => {
       pausedAt: settings?.automationPausedAt || null
     },
     shipstation: {
-      configured: Boolean(credentials),
-      connectionStatus: credentials?.connectionStatus || "missing",
-      lastSuccessAt: credentials?.lastSuccessAt || null
+      configured: demo.enabled || Boolean(credentials),
+      connectionStatus: demo.enabled ? "demo_connected" : credentials?.connectionStatus || "missing",
+      lastSuccessAt: credentials?.lastSuccessAt || null,
+      demo
     },
+    demo,
     plan: {
       name: shop.planName,
       status: shop.planStatus
@@ -234,6 +252,10 @@ adminRouter.get("/dashboard", async (req, res) => {
     importWaitingJobs,
     recentActivity: recentWithActions
   });
+});
+
+adminRouter.get("/demo", async (_req, res) => {
+  res.json(demoConfig());
 });
 
 adminRouter.get("/automation", async (req, res) => {
@@ -309,31 +331,36 @@ adminRouter.post("/simulator", async (req, res) => {
   };
   const eligibility = evaluateOrderEligibility(order, settings);
   const foundation = evaluateRuleFoundation(order, settings);
-  const wouldRelease = eligibility.eligible && foundation.passed;
+  const demoCandidate = isDemoReleaseCandidate(order);
+  const demo = demoConfig();
+  const wouldRelease = demoCandidate || (eligibility.eligible && foundation.passed);
   await logReleaseEvent({
     shopId: req.shop!.id,
     orderId: input.orderId,
     orderName: order.name,
     eventType: "manual_release",
     status: "info",
-    message: `Dry run simulated for ${order.name}.`,
-    metadata: { dryRun: true, wouldRelease }
+    message: demoCandidate ? "Demo release dry run simulated. No live ShipStation action was performed." : `Dry run simulated for ${order.name}.`,
+    metadata: { dryRun: true, wouldRelease, demoMode: demo.enabled, demoCandidate, demoTag: demo.tag }
   });
   res.json({
     dryRun: true,
+    demo,
+    demoCandidate,
     webhookDetected: true,
-    queueJobCreated: wouldRelease,
+    queueJobCreated: demoCandidate ? false : wouldRelease,
     ruleEvaluation: {
-      eligible: eligibility.eligible,
-      reason: eligibility.reason,
+      eligible: demoCandidate || eligibility.eligible,
+      reason: demoCandidate ? "Demo tag matched" : eligibility.reason,
       foundation
     },
-    decision: wouldRelease ? "would_release" : "would_block",
+    decision: demoCandidate ? "would_simulate_release" : wouldRelease ? "would_release" : "would_block",
     shipStationPayloadPreview: wouldRelease ? {
-      action: "restorefromhold",
+      action: demoCandidate ? "demo_simulated_release" : "restorefromhold",
       lookupCandidates: [order.name, String(order.id)].filter(Boolean),
       orderNumber: order.name,
-      gateway: orderGateway(order)
+      gateway: orderGateway(order),
+      liveShipStationAction: false
     } : null
   });
 });
@@ -519,6 +546,8 @@ adminRouter.put("/shipstation", async (req, res) => {
 });
 
 adminRouter.post("/shipstation/test", async (req, res) => {
+  const demo = demoConfig();
+  if (demo.enabled) return res.json(shipStationCredentialSummary(null));
   const credentials = await prisma.shipStationCredential.findUnique({ where: { shopId: req.shop!.id } });
   if (!credentials) return res.status(400).json({ error: "ShipStation credentials have not been saved" });
   try {
@@ -576,7 +605,7 @@ adminRouter.get("/support", async (req, res) => {
     diagnostics: {
       shopDomain: req.shop!.domain,
       plan: req.shop!.planName,
-      shipStationConnectionStatus: credentials?.connectionStatus || "missing",
+      shipStationConnectionStatus: demoConfig().enabled ? "demo_connected" : credentials?.connectionStatus || "missing",
       automationEnabled: Boolean(settings?.enabled),
       recentFailureCount: failures
     }

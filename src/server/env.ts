@@ -15,6 +15,13 @@ const schema = z.object({
   EMAIL_FROM: z.string().optional(),
   SUPPORT_EMAIL: z.string().email().optional(),
   SHIPRELEASE_SECRET_ENCRYPTION_KEY: z.string().min(32),
+  SHIPRELEASE_DEMO_MODE: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .transform((value) => ["1", "true", "yes", "on"].includes(value))
+    .default("false"),
+  SHIPRELEASE_DEMO_TAG: z.string().trim().min(1).default("shiprelease-demo"),
   NODE_ENV: z.string().default("development"),
   PORT: z.coerce.number().default(3000)
 });

@@ -69,6 +69,28 @@ Import waiting uses the same BullMQ job with `job.moveToDelayed(...)` and `Delay
 
 No ShipStation API key, API secret, authorization header, or encrypted credential is logged or returned by the API.
 
+## Shopify Review Demo Mode
+
+ShipRelease has an environment-controlled demo mode for Shopify app review and development stores that cannot reliably create real pending manual-payment orders.
+
+```sh
+SHIPRELEASE_DEMO_MODE=true
+SHIPRELEASE_DEMO_TAG=shiprelease-demo
+```
+
+When demo mode is enabled, any Shopify order tagged with `SHIPRELEASE_DEMO_TAG` is treated as a simulated release candidate. The app records dashboard activity and a release audit message that says `Demo release completed — no live ShipStation action was performed.`
+
+Demo releases do not call ShipStation, do not require saved ShipStation credentials, do not increment managed-pricing usage, and do not expose any secrets. The ShipStation page shows a clearly labelled simulated connected state while demo mode is active.
+
+Shopify reviewer flow:
+
+1. Create a Bogus Gateway order in the review store.
+2. Add the tag `shiprelease-demo` to the order, or the configured `SHIPRELEASE_DEMO_TAG`.
+3. Return to the ShipRelease dashboard.
+4. Confirm the simulated release activity and audit copy.
+
+Disable demo mode by setting `SHIPRELEASE_DEMO_MODE=false` or removing the variable. With demo mode disabled, production eligibility, ShipStation credential, queue, retry, and release behavior are unchanged.
+
 ## Automation Pause And Resume
 
 Each shop has a global automation control:
@@ -195,6 +217,8 @@ npm run worker
 - `EMAIL_FROM`
 - `SUPPORT_EMAIL`
 - `SHIPRELEASE_SECRET_ENCRYPTION_KEY`
+- `SHIPRELEASE_DEMO_MODE=false`
+- `SHIPRELEASE_DEMO_TAG=shiprelease-demo`
 - `NODE_ENV`
 - `PORT`
 

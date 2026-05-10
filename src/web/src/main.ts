@@ -101,6 +101,11 @@ function pageIntro(title: string, detail: string) {
   return `<section class="page-intro"><div><h2>${title}</h2><p>${detail}</p></div></section>`;
 }
 
+function demoBanner(demo: any) {
+  if (!demo?.enabled) return "";
+  return `<section class="demo-banner"><strong>Demo mode active — orders tagged ${demo.tag} can be safely tested. No live ShipStation actions are performed.</strong></section>`;
+}
+
 function fieldHelp(text: string) {
   return `<span class="field-help">${text}</span>`;
 }
@@ -151,14 +156,16 @@ function dashboard(data: any) {
     </tr>
   `).join("");
   const shipstationStatus = data.shipstation?.connectionStatus || "missing";
+  const demo = data.demo || data.shipstation?.demo;
   const waitingImports = (data.importWaitingJobs || []).length;
   const planActive = data.plan?.name && data.plan.name !== "unknown" && data.plan?.status === "active";
   shell(`
+    ${demoBanner(demo)}
     <section class="ops-hero ${data.automation?.paused ? "paused" : "active"}">
       <div class="ops-hero-copy">
         <span class="eyebrow">Operations overview</span>
-        <h2>${data.automation?.paused ? "Automation paused" : "Automation active"}</h2>
-        <p>${data.automation?.paused ? "New releases are stopped. Queued work is deferred safely and audit logging stays active." : `ShipStation is ${shipstationStatus.replaceAll("_", " ")}. Eligible orders can be released automatically when rules match.`}</p>
+        <h2>${demo?.enabled ? "Demo releases active" : data.automation?.paused ? "Automation paused" : "Automation active"}</h2>
+        <p>${demo?.enabled ? `Tagged demo orders are recorded as simulated releases. No live ShipStation action is performed.` : data.automation?.paused ? "New releases are stopped. Queued work is deferred safely and audit logging stays active." : `ShipStation is ${shipstationStatus.replaceAll("_", " ")}. Eligible orders can be released automatically when rules match.`}</p>
       </div>
       <div class="ops-hero-actions">
         ${data.automation?.paused ? `<button class="primary" type="button" id="resume-automation">Automation active</button>` : `<button class="quiet" type="button" id="pause-automation">Pause all releases</button>`}
@@ -363,6 +370,7 @@ function automation(data: any) {
 }
 
 function simulator(data: any = {}) {
+  const demo = data.demo || {};
   const preview = data.result?.shipStationPayloadPreview || { blocked: true };
   const previewRows = Object.entries(preview).map(([key, value]) => `
     <div><dt>${key.replaceAll("_", " ")}</dt><dd>${Array.isArray(value) ? value.join(", ") : String(value)}</dd></div>
@@ -373,7 +381,7 @@ function simulator(data: any = {}) {
       <dl class="result-grid">
         <div><dt>Webhook detected</dt><dd>${data.result.webhookDetected}</dd></div>
         <div><dt>Queue job created</dt><dd>${data.result.queueJobCreated}</dd></div>
-        <div><dt>Decision</dt><dd>${data.result.decision.replace("_", " ")}</dd></div>
+        <div><dt>Decision</dt><dd>${data.result.decision.replaceAll("_", " ")}</dd></div>
         <div><dt>Rule result</dt><dd>${data.result.ruleEvaluation.eligible && data.result.ruleEvaluation.foundation.passed ? "Passed" : data.result.ruleEvaluation.reason || "Blocked by rule foundation"}</dd></div>
       </dl>
       <h3>ShipStation preview</h3>
@@ -381,7 +389,19 @@ function simulator(data: any = {}) {
     </section>
   ` : "";
   shell(`
+    ${demoBanner(demo)}
     ${pageIntro("Release simulator", "Test an order against the current rule set without queueing a job or calling ShipStation.")}
+    ${demo?.enabled ? `
+      <section class="panel section-panel demo-steps">
+        <div class="panel-heading"><div><h2>Shopify review demo</h2><p>Use this flow when a development store cannot create a true manual-payment pending order.</p></div>${statusBadge("demo")}</div>
+        <ol>
+          <li>Create a Bogus Gateway order in Shopify.</li>
+          <li>Add the tag ${demo.tag} to the order.</li>
+          <li>Return to the ShipRelease dashboard.</li>
+          <li>Confirm simulated release activity that says no live ShipStation action was performed.</li>
+        </ol>
+      </section>
+    ` : ""}
     <section class="panel form-card">
       <div class="panel-heading"><div><h2>Dry run inputs</h2><p>Use a recent order shape or a hypothetical manual-payment order.</p></div>${statusBadge("dry run")}</div>
       <div class="reassurance"><i></i><span>No real release will be made and ShipStation will not be called.</span></div>
@@ -391,7 +411,7 @@ function simulator(data: any = {}) {
           <label>Display name<input name="orderName" placeholder="#1001"></label>
           <label>Financial status<select name="financialStatus"><option value="pending">pending</option><option value="unpaid">unpaid</option><option value="paid">paid</option><option value="partially_paid">partially_paid</option></select></label>
           <label>Gateway<input name="gateway" value="Manual Payment"></label>
-          <label>Tags<input name="tags" placeholder="wholesale, review"></label>
+          <label>Tags<input name="tags" placeholder="${demo?.enabled ? demo.tag : "wholesale, review"}"></label>
           <label>Total price<input name="totalPrice" value="0" type="number" min="0" step="0.01"></label>
           <label>Risk level<select name="riskLevel"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
         </div>
@@ -416,13 +436,19 @@ function simulator(data: any = {}) {
       })
     });
     state.message = "Dry run complete.";
-    state.data.simulator = { result };
+    state.data.simulator = { ...state.data.simulator, result };
     simulator(state.data.simulator);
   };
 }
 
 function shipstation(data: any) {
-  const savedCredentials = data.configured ? `
+  const demo = data.demo || {};
+  const savedCredentials = demo.enabled ? `
+    <div class="credential-summary premium-summary">
+      <div><strong>Demo connection active</strong><span>Simulated connected state for Shopify review.</span></div>
+      <div><strong>No live ShipStation action</strong><span>Demo releases bypass the ShipStation API.</span></div>
+    </div>
+  ` : data.configured ? `
     <div class="credential-summary premium-summary">
       <div><strong>Credentials saved securely</strong><span>API key: ${data.apiKeyPreview || "saved"}</span></div>
       <div><strong>API secret</strong><span>Saved securely and never displayed</span></div>
@@ -433,14 +459,19 @@ function shipstation(data: any) {
     </div>
   `;
   shell(`
-    ${pageIntro("ShipStation connection", "Connect the ShipStation account that receives imported Shopify orders. Secrets are encrypted and never shown again.")}
-    <section class="panel connection-card ${data.connectionStatus === "connected" ? "connected" : "attention"}">
+    ${demoBanner(demo)}
+    ${pageIntro("ShipStation connection", demo.enabled ? "Demo connection active for Shopify review. This is simulated and does not call ShipStation." : "Connect the ShipStation account that receives imported Shopify orders. Secrets are encrypted and never shown again.")}
+    <section class="panel connection-card ${data.connectionStatus === "connected" || data.connectionStatus === "demo_connected" ? "connected" : "attention"}">
       <div class="integration-mark"><i></i><span>ShipStation</span></div>
-      <div class="panel-heading"><div><h2>Connection status</h2><p>Last success: ${data.lastSuccessAt ? new Date(data.lastSuccessAt).toLocaleString() : "No successful test recorded"}</p></div>${statusBadge(data.connectionStatus)}</div>
+      <div class="panel-heading"><div><h2>${demo.enabled ? "Demo connection active" : "Connection status"}</h2><p>${demo.enabled ? "Simulated connected state. No live ShipStation actions are performed." : `Last success: ${data.lastSuccessAt ? new Date(data.lastSuccessAt).toLocaleString() : "No successful test recorded"}`}</p></div>${statusBadge(data.connectionStatus)}</div>
       ${data.lastFailureReason ? `<div class="inline-warning">${data.lastFailureReason}</div>` : ""}
       ${savedCredentials}
     </section>
-    <section class="panel form-card">
+    ${demo.enabled ? `
+      <section class="panel section-panel quiet-panel">
+        <div class="panel-heading"><div><h2>Credential entry disabled for demo review</h2><p>Set SHIPRELEASE_DEMO_MODE=false to use real encrypted ShipStation credentials and connection testing.</p></div></div>
+      </section>
+    ` : `<section class="panel form-card">
       <div class="panel-heading"><div><h2>${data.configured ? "Replace credentials" : "Save credentials"}</h2><p>${data.configured ? "Enter both fields to replace the stored ShipStation credentials. Existing secrets are not displayed." : "Add API credentials from ShipStation to enable release automation."}</p></div></div>
       <div class="reassurance"><i></i><span>Credentials are stored encrypted. The API secret is never returned to this page.</span></div>
       <form class="form" id="shipstation-form">
@@ -448,9 +479,11 @@ function shipstation(data: any) {
         <label>API secret<input name="apiSecret" type="password" autocomplete="new-password" placeholder="${data.configured ? "Enter a new API secret to replace saved credentials" : ""}" required></label>
         <div class="actions"><button class="primary" type="submit">${data.configured ? "Replace credentials" : "Save credentials"}</button><button class="secondary" type="button" id="test-connection">Test connection</button></div>
       </form>
-    </section>
+    </section>`}
   `);
-  document.querySelector<HTMLFormElement>("#shipstation-form")!.onsubmit = async (event) => {
+  const formElement = document.querySelector<HTMLFormElement>("#shipstation-form");
+  if (!formElement) return;
+  formElement.onsubmit = async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     await api("shipstation", { method: "PUT", body: JSON.stringify({ apiKey: form.get("apiKey"), apiSecret: form.get("apiSecret") }) });
@@ -550,6 +583,13 @@ function support(data: any) {
 async function load(tab: Tab) {
   state.tab = tab;
   if (tab === "simulator") {
+    if (!state.data.simulator) {
+      try {
+        state.data.simulator = { demo: await api("demo") };
+      } catch {
+        state.data.simulator = {};
+      }
+    }
     simulator(state.data.simulator);
     return;
   }

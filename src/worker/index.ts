@@ -7,6 +7,7 @@ import { locateShipStationOrder, orderCandidates, releaseShipStationOrder } from
 import { getPlanUsage } from "../server/services/plans.js";
 import { sendNotification } from "../server/services/notifications.js";
 import { logReleaseEvent } from "../server/services/releaseEvents.js";
+import { logDemoDecision } from "../server/services/demoMode.js";
 
 if (!redisConnection) throw new Error("REDIS_URL is required to start the ShipRelease worker");
 
@@ -173,6 +174,15 @@ async function processRelease(job: Job<ReleaseJob>) {
   });
   if (!releaseJob) return;
   if (releaseJob.status === "released") return;
+  if (releaseJob.status === "demo_completed") {
+    logDemoDecision("DEMO_SHIPSTATION_BYPASS", {
+      shopId: releaseJob.shopId,
+      orderId: releaseJob.shopifyOrderId,
+      orderName: releaseJob.shopifyOrderName,
+      releaseJobId: releaseJob.id
+    });
+    return;
+  }
   if (releaseJob.shop.uninstalledAt) {
     await prisma.releaseJob.update({
       where: { id: releaseJob.id },

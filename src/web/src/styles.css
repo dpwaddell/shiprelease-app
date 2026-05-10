@@ -199,6 +199,22 @@ main {
   box-shadow: var(--shadow);
 }
 
+.demo-banner {
+  max-width: calc(var(--content-width) - 48px);
+  margin: 14px 24px 0;
+  padding: 13px 14px;
+  border: 1px solid #8bb8e8;
+  background: #eef5ff;
+  border-radius: 8px;
+  color: #095c83;
+  display: grid;
+  gap: 3px;
+}
+
+.demo-banner span {
+  color: #095c83;
+}
+
 .credential-summary, .plan-notice {
   display: grid;
   gap: 6px;
@@ -705,7 +721,7 @@ textarea {
   font-weight: 400;
 }
 
-.status.released, .status.connected {
+.status.released, .status.connected, .status.demo_connected, .status.demo_completed {
   background: #f1f8f5;
   color: #007f5f;
   border-color: rgba(0, 127, 95, 0.16);

@@ -3,6 +3,7 @@ import { prisma } from "../db.js";
 import { enqueueRelease } from "../queue/releaseQueue.js";
 import { evaluateOrderEligibility, evaluateRuleFoundation, orderGateway } from "./eligibility.js";
 import { logReleaseEvent } from "./releaseEvents.js";
+import { demoConfig, isDemoReleaseCandidate, logDemoDecision } from "./demoMode.js";
 
 type ShopifyOrder = {
   id: string | number;
@@ -16,6 +17,7 @@ type ShopifyOrder = {
 };
 
 const ACTIVE_JOB_STATUSES = ["queued", "retrying", "waiting_for_shipstation_import"] as const;
+const DEMO_SUCCESS_MESSAGE = "Demo release completed — no live ShipStation action was performed.";
 
 export async function hasActiveReleaseJob(shopId: string, orderId: string) {
   return prisma.releaseJob.findFirst({
@@ -57,6 +59,8 @@ export async function queueReleaseFromOrder(input: {
     foundation,
     automationPaused: input.settings.automationPaused
   };
+  const demoCandidate = isDemoReleaseCandidate(input.order);
+  const demo = demoConfig();
 
   if (input.settings.automationPaused) {
     await logReleaseEvent({
@@ -83,6 +87,63 @@ export async function queueReleaseFromOrder(input: {
       metadata: { releaseJobId: active.id, status: active.status, source: input.source }
     });
     return { queued: false, ignored: true, reason: "Active release job already exists", releaseJob: active };
+  }
+
+  if (demoCandidate) {
+    logDemoDecision("DEMO_RELEASE_CANDIDATE", { shopId: input.shopId, orderId, orderName, source: input.source, demoTag: demo.tag });
+    logDemoDecision("DEMO_SHIPSTATION_BYPASS", { shopId: input.shopId, orderId, orderName, source: input.source });
+    const idempotencyKey = `${input.shopId}:${orderId}:demo-release:${demo.tag.toLowerCase()}`;
+    const releaseJob = await prisma.releaseJob.upsert({
+      where: { idempotencyKey },
+      update: {
+        status: "demo_completed",
+        skipReason: null,
+        failureReason: null,
+        queuedAt: new Date(),
+        releasedAt: new Date(),
+        ruleEvaluation: { ...ruleEvaluation, demoMode: true, demoTag: demo.tag },
+        decisionReason: "Demo mode tag matched; simulated release completed without ShipStation.",
+        source: input.source,
+        lookupCandidates: []
+      },
+      create: {
+        shopId: input.shopId,
+        shopifyOrderId: orderId,
+        shopifyOrderName: orderName,
+        shopifyFinancialStatus: input.order.financial_status,
+        shopifyGateway: gateway,
+        idempotencyKey,
+        status: "demo_completed",
+        skipReason: null,
+        failureReason: null,
+        source: input.source,
+        retryOfJobId: input.retryOfJobId,
+        ruleEvaluation: { ...ruleEvaluation, demoMode: true, demoTag: demo.tag },
+        decisionReason: "Demo mode tag matched; simulated release completed without ShipStation.",
+        lookupCandidates: [],
+        releasedAt: new Date()
+      }
+    });
+    await logReleaseEvent({
+      shopId: input.shopId,
+      orderId,
+      orderName,
+      eventType: "demo_release_candidate",
+      status: "info",
+      message: `Demo mode tag ${demo.tag} matched. ShipStation will not be called.`,
+      metadata: { releaseJobId: releaseJob.id, source: input.source, demoMode: true, demoTag: demo.tag }
+    });
+    await logReleaseEvent({
+      shopId: input.shopId,
+      orderId,
+      orderName,
+      eventType: "release_success",
+      status: "success",
+      message: DEMO_SUCCESS_MESSAGE,
+      metadata: { releaseJobId: releaseJob.id, source: input.source, demoMode: true, demoTag: demo.tag, simulated: true }
+    });
+    logDemoDecision("DEMO_RELEASE_COMPLETED", { shopId: input.shopId, orderId, orderName, releaseJobId: releaseJob.id, source: input.source });
+    return { queued: false, ignored: false, simulated: true, reason: "Demo release completed", releaseJob };
   }
 
   const retryCount = input.retryOfJobId
