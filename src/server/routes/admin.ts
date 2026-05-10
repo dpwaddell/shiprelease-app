@@ -5,7 +5,7 @@ import { env } from "../env.js";
 import { decryptSecret, encryptSecret } from "../utils/crypto.js";
 import { billingMonth } from "../utils/shop.js";
 import { getPlanUsage, planLimit, PLAN_LIMITS } from "../services/plans.js";
-import { fetchRecentUpdatedOrders, syncManagedPricing } from "../services/shopify.js";
+import { fetchRecentTaggedOrders, fetchRecentUpdatedOrders, syncManagedPricing } from "../services/shopify.js";
 import { testShipStationConnection } from "../services/shipstation.js";
 import { sendNotification } from "../services/notifications.js";
 import { releaseQueue } from "../queue/releaseQueue.js";
@@ -256,6 +256,43 @@ adminRouter.get("/dashboard", async (req, res) => {
 
 adminRouter.get("/demo", async (_req, res) => {
   res.json(demoConfig());
+});
+
+adminRouter.post("/demo/sync", async (req, res) => {
+  const demo = demoConfig();
+  if (!demo.enabled) return res.status(404).json({ error: "Demo sync is not enabled" });
+
+  const shop = req.shop!;
+  const settings = await prisma.automationSetting.upsert({
+    where: { shopId: shop.id },
+    update: {},
+    create: { shopId: shop.id }
+  });
+  const orders = await fetchRecentTaggedOrders(shop.id, demo.tag);
+  let processed = 0;
+  let alreadyProcessed = 0;
+
+  for (const order of orders) {
+    const result = await queueReleaseFromOrder({
+      shopId: shop.id,
+      order,
+      settings,
+      source: "demo_sync"
+    });
+    if (result.simulated && result.processed) processed += 1;
+    if (result.simulated && result.processed === false) alreadyProcessed += 1;
+  }
+
+  await prisma.appEvent.create({
+    data: {
+      shopId: shop.id,
+      eventType: "demo_sync_completed",
+      message: `Demo sync found ${orders.length} tagged orders and processed ${processed}`,
+      metadata: { demoMode: true, demoTag: demo.tag, found: orders.length, processed, alreadyProcessed }
+    }
+  });
+
+  res.json({ demo, found: orders.length, processed, alreadyProcessed });
 });
 
 adminRouter.get("/automation", async (req, res) => {

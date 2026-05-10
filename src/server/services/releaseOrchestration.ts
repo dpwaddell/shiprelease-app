@@ -18,6 +18,7 @@ type ShopifyOrder = {
 
 const ACTIVE_JOB_STATUSES = ["queued", "retrying", "waiting_for_shipstation_import"] as const;
 const DEMO_SUCCESS_MESSAGE = "Demo release completed — no live ShipStation action was performed.";
+type ReleaseSource = "webhook" | "reconciliation" | "manual_retry" | "demo_sync";
 
 export async function hasActiveReleaseJob(shopId: string, orderId: string) {
   return prisma.releaseJob.findFirst({
@@ -38,7 +39,7 @@ export async function queueReleaseFromOrder(input: {
   shopId: string;
   order: ShopifyOrder;
   settings: AutomationSetting;
-  source: "webhook" | "reconciliation" | "manual_retry";
+  source: ReleaseSource;
   retryOfJobId?: string;
 }) {
   const orderId = String(input.order.id);
@@ -90,9 +91,20 @@ export async function queueReleaseFromOrder(input: {
   }
 
   if (demoCandidate) {
+    const idempotencyKey = `${input.shopId}:${orderId}:demo-release:${demo.tag.toLowerCase()}`;
+    const existingDemoRelease = await prisma.releaseJob.findUnique({ where: { idempotencyKey } });
+    if (existingDemoRelease?.status === "demo_completed") {
+      return {
+        queued: false,
+        ignored: false,
+        simulated: true,
+        processed: false,
+        reason: "Demo release already completed",
+        releaseJob: existingDemoRelease
+      };
+    }
     logDemoDecision("DEMO_RELEASE_CANDIDATE", { shopId: input.shopId, orderId, orderName, source: input.source, demoTag: demo.tag });
     logDemoDecision("DEMO_SHIPSTATION_BYPASS", { shopId: input.shopId, orderId, orderName, source: input.source });
-    const idempotencyKey = `${input.shopId}:${orderId}:demo-release:${demo.tag.toLowerCase()}`;
     const releaseJob = await prisma.releaseJob.upsert({
       where: { idempotencyKey },
       update: {
@@ -143,7 +155,7 @@ export async function queueReleaseFromOrder(input: {
       metadata: { releaseJobId: releaseJob.id, source: input.source, demoMode: true, demoTag: demo.tag, simulated: true }
     });
     logDemoDecision("DEMO_RELEASE_COMPLETED", { shopId: input.shopId, orderId, orderName, releaseJobId: releaseJob.id, source: input.source });
-    return { queued: false, ignored: false, simulated: true, reason: "Demo release completed", releaseJob };
+    return { queued: false, ignored: false, simulated: true, processed: true, reason: "Demo release completed", releaseJob };
   }
 
   const retryCount = input.retryOfJobId

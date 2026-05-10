@@ -103,7 +103,27 @@ function pageIntro(title: string, detail: string) {
 
 function demoBanner(demo: any) {
   if (!demo?.enabled) return "";
-  return `<section class="demo-banner"><strong>Demo mode active — orders tagged ${demo.tag} can be safely tested. No live ShipStation actions are performed.</strong></section>`;
+  return `
+    <section class="demo-banner">
+      <div>
+        <strong>Demo mode active — orders tagged ${demo.tag} can be safely tested. No live ShipStation actions are performed.</strong>
+        <span>Run demo sync after adding the ${demo.tag} tag to a test order.</span>
+      </div>
+      <button class="secondary" type="button" data-demo-sync>Run demo sync</button>
+    </section>
+  `;
+}
+
+function attachDemoSyncHandler() {
+  document.querySelectorAll<HTMLButtonElement>("[data-demo-sync]").forEach((button) => {
+    button.onclick = async () => {
+      button.disabled = true;
+      button.textContent = "Running demo sync";
+      const result = await api<any>("demo/sync", { method: "POST" });
+      state.message = `Demo sync complete: ${result.found} tagged orders found, ${result.processed} processed.`;
+      await load("dashboard");
+    };
+  });
 }
 
 function fieldHelp(text: string) {
@@ -229,6 +249,7 @@ function dashboard(data: any) {
     load("dashboard");
   });
   document.querySelector<HTMLButtonElement>("#dashboard-plans")?.addEventListener("click", () => load("plans"));
+  attachDemoSyncHandler();
   document.querySelectorAll<HTMLButtonElement>("[data-release-retry]").forEach((button) => {
     button.onclick = async () => {
       await api(`releases/${button.dataset.releaseRetry}/retry`, { method: "POST" });
@@ -439,6 +460,7 @@ function simulator(data: any = {}) {
     state.data.simulator = { ...state.data.simulator, result };
     simulator(state.data.simulator);
   };
+  attachDemoSyncHandler();
 }
 
 function shipstation(data: any) {
@@ -482,6 +504,7 @@ function shipstation(data: any) {
     </section>`}
   `);
   const formElement = document.querySelector<HTMLFormElement>("#shipstation-form");
+  attachDemoSyncHandler();
   if (!formElement) return;
   formElement.onsubmit = async (event) => {
     event.preventDefault();

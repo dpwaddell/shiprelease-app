@@ -163,6 +163,10 @@ function numericShopifyId(gid: string) {
   return gid.split("/").pop() || gid;
 }
 
+function shopifySearchValue(value: string) {
+  return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+}
+
 export async function fetchRecentUpdatedOrders(shopId: string, since: Date): Promise<RecentShopifyOrder[]> {
   const data = await shopifyGraphql<{
     data?: {
@@ -208,4 +212,61 @@ export async function fetchRecentUpdatedOrders(shopId: string, since: Date): Pro
       total_price: node.totalPriceSet?.shopMoney?.amount || "0"
     };
   });
+}
+
+function orderNodeToRecentOrder(node: {
+  id: string;
+  name: string;
+  displayFinancialStatus?: string | null;
+  tags: string[];
+  totalPriceSet?: { shopMoney?: { amount?: string | null } | null } | null;
+  transactions?: Array<{ gateway?: string | null }>;
+}) {
+  const gateways = (node.transactions || []).map((transaction) => transaction.gateway || "").filter(Boolean);
+  return {
+    id: numericShopifyId(node.id),
+    name: node.name,
+    financial_status: String(node.displayFinancialStatus || "").toLowerCase(),
+    gateway: gateways.join(", "),
+    payment_gateway_names: gateways,
+    tags: node.tags.join(", "),
+    total_price: node.totalPriceSet?.shopMoney?.amount || "0"
+  };
+}
+
+export async function fetchRecentTaggedOrders(shopId: string, tag: string): Promise<RecentShopifyOrder[]> {
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const data = await shopifyGraphql<{
+    data?: {
+      orders?: {
+        edges: Array<{
+          node: {
+            id: string;
+            name: string;
+            displayFinancialStatus?: string | null;
+            tags: string[];
+            totalPriceSet?: { shopMoney?: { amount?: string | null } | null } | null;
+            transactions?: Array<{ gateway?: string | null }>;
+          };
+        }>;
+      };
+    };
+  }>(shopId, `
+    query DemoTaggedOrders($query: String!) {
+      orders(first: 100, sortKey: UPDATED_AT, reverse: true, query: $query) {
+        edges {
+          node {
+            id
+            name
+            displayFinancialStatus
+            tags
+            totalPriceSet { shopMoney { amount } }
+            transactions(first: 5) { gateway }
+          }
+        }
+      }
+    }
+  `, { query: `tag:${shopifySearchValue(tag)} updated_at:>=${since.toISOString()}` });
+
+  return (data.data?.orders?.edges || []).map(({ node }) => orderNodeToRecentOrder(node));
 }

@@ -86,8 +86,9 @@ Shopify reviewer flow:
 
 1. Create a Bogus Gateway order in the review store.
 2. Add the tag `shiprelease-demo` to the order, or the configured `SHIPRELEASE_DEMO_TAG`.
-3. Return to the ShipRelease dashboard.
-4. Confirm the simulated release activity and audit copy.
+3. Return to the ShipRelease dashboard or simulator.
+4. Click **Run demo sync** after adding the demo tag to a test order.
+5. Confirm the simulated release activity and audit copy.
 
 Disable demo mode by setting `SHIPRELEASE_DEMO_MODE=false` or removing the variable. With demo mode disabled, production eligibility, ShipStation credential, queue, retry, and release behavior are unchanged.
 

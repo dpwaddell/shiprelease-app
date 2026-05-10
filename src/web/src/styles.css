@@ -207,11 +207,15 @@ main {
   background: #eef5ff;
   border-radius: 8px;
   color: #095c83;
-  display: grid;
-  gap: 3px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
 }
 
 .demo-banner span {
+  display: block;
+  margin-top: 3px;
   color: #095c83;
 }
 
@@ -1074,7 +1078,7 @@ h3 {
     padding-right: 16px;
   }
 
-  .topbar, nav, .ops-hero {
+  .topbar, nav, .ops-hero, .demo-banner {
     flex-wrap: wrap;
   }
 
@@ -1128,7 +1132,8 @@ h3 {
   .ops-hero-actions button,
   .actions button,
   .actions .button,
-  .sticky-actions button {
+  .sticky-actions button,
+  .demo-banner button {
     width: 100%;
   }
 
