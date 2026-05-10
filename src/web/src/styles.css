@@ -90,6 +90,20 @@ main {
   border-radius: 6px;
 }
 
+.credential-summary, .plan-notice {
+  display: grid;
+  gap: 6px;
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid #dfe3e8;
+  border-radius: 6px;
+  background: #fafbfb;
+}
+
+.credential-summary small, .plan-notice span {
+  color: #6d7175;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

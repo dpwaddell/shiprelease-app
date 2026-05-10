@@ -133,13 +133,27 @@ function automation(data: any) {
 }
 
 function shipstation(data: any) {
+  const savedCredentials = data.configured ? `
+    <div class="credential-summary">
+      <strong>Credentials saved securely</strong>
+      <span>API key: ${data.apiKeyPreview || "saved"}</span>
+      <span>API secret: saved securely and never displayed</span>
+      <small>Entering a new API key and API secret will replace the saved credentials.</small>
+    </div>
+  ` : `
+    <div class="credential-summary">
+      <strong>No ShipStation credentials saved</strong>
+      <span>Add your API key and API secret to enable releases.</span>
+    </div>
+  `;
   shell(`
     <section class="panel">
       <div class="split"><div><h2>Connection</h2><p>Status: <span class="status ${data.connectionStatus}">${data.connectionStatus}</span></p><p>Last success: ${data.lastSuccessAt ? new Date(data.lastSuccessAt).toLocaleString() : "-"}</p><p>${data.lastFailureReason || ""}</p></div></div>
+      ${savedCredentials}
       <form class="form" id="shipstation-form">
-        <label>API key<input name="apiKey" autocomplete="off" required></label>
-        <label>API secret<input name="apiSecret" type="password" autocomplete="new-password" required></label>
-        <div class="actions"><button type="submit">Save credentials</button><button type="button" id="test-connection">Test connection</button></div>
+        <label>API key<input name="apiKey" autocomplete="off" placeholder="${data.configured ? "Enter a new API key to replace saved credentials" : ""}" required></label>
+        <label>API secret<input name="apiSecret" type="password" autocomplete="new-password" placeholder="${data.configured ? "Enter a new API secret to replace saved credentials" : ""}" required></label>
+        <div class="actions"><button type="submit">${data.configured ? "Replace credentials" : "Save credentials"}</button><button type="button" id="test-connection">Test connection</button></div>
       </form>
     </section>
   `);
@@ -159,15 +173,28 @@ function shipstation(data: any) {
 
 function plans(data: any) {
   const planRows = Object.entries(data.plans || {}).map(([name, limit]) => `<tr><td>${name}</td><td>${limit} releases/month</td></tr>`).join("");
+  const inactivePlan = !data.currentPlan || data.currentPlan === "unknown" || data.planStatus !== "active";
+  const planNotice = inactivePlan ? `
+    <div class="plan-notice">
+      <strong>No active Shopify managed plan detected yet.</strong>
+      <span>This can happen immediately after install or before selecting a plan.</span>
+    </div>
+  ` : "";
   shell(`
     <section class="panel">
       <h2>Managed Pricing</h2>
+      ${planNotice}
       <p>Current plan: <strong>${data.currentPlan}</strong> (${data.planStatus})</p>
       <p>Usage this month: ${data.usage?.count || 0} / ${data.allowance || 0}</p>
       <table><tbody>${planRows}</tbody></table>
-      <div class="actions"><a class="button" href="${data.manageUrl}" target="_top">Manage plan in Shopify</a></div>
+      <div class="actions"><button type="button" id="refresh-plan">Refresh plan status</button><a class="button" href="${data.manageUrl}" target="_top">Manage plan in Shopify</a></div>
     </section>
   `);
+  document.querySelector<HTMLButtonElement>("#refresh-plan")!.onclick = async () => {
+    await api("plans/refresh", { method: "POST" });
+    state.message = "Plan status refreshed.";
+    load("plans");
+  };
 }
 
 function support(data: any) {

@@ -19,13 +19,21 @@ function headers(auth: ShipStationAuth) {
   };
 }
 
+function redactAuthDetails(message: string, auth: ShipStationAuth) {
+  const basicToken = Buffer.from(`${auth.apiKey}:${auth.apiSecret}`).toString("base64");
+  return [auth.apiKey, auth.apiSecret, basicToken].reduce(
+    (text, secret) => secret ? text.split(secret).join("[redacted]") : text,
+    message
+  );
+}
+
 async function request<T>(path: string, auth: ShipStationAuth, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
     ...init,
     headers: { ...headers(auth), ...(init?.headers || {}) }
   });
   if (!response.ok) {
-    const body = await response.text();
+    const body = redactAuthDetails(await response.text(), auth);
     throw new Error(`ShipStation ${response.status}: ${body.slice(0, 300)}`);
   }
   if (response.status === 204) return undefined as T;

@@ -11,6 +11,15 @@ import { sendNotification } from "../services/notifications.js";
 
 export const adminRouter = express.Router();
 
+type ShipStationCredentialSummary = {
+  configured: boolean;
+  connectionStatus: string;
+  lastCheckedAt?: Date | null;
+  lastSuccessAt?: Date | null;
+  lastFailureReason?: string | null;
+  apiKeyPreview?: string | null;
+};
+
 const automationSchema = z.object({
   enabled: z.boolean(),
   financialStatuses: z.array(z.string()).default(["pending", "unpaid"]),
@@ -20,6 +29,41 @@ const automationSchema = z.object({
   releaseDelayMinutes: z.union([z.literal(0), z.literal(5), z.literal(15), z.literal(60)]),
   notificationEmail: z.string().email().or(z.literal("")).nullable().optional()
 });
+
+function maskApiKey(apiKey: string) {
+  const suffix = apiKey.slice(-4);
+  return suffix ? `****${suffix}` : "saved";
+}
+
+function shipStationCredentialSummary(credentials: {
+  encryptedApiKey: string;
+  connectionStatus: string;
+  lastCheckedAt: Date | null;
+  lastSuccessAt: Date | null;
+  lastFailureReason: string | null;
+} | null): ShipStationCredentialSummary {
+  return {
+    configured: Boolean(credentials),
+    connectionStatus: credentials?.connectionStatus || "missing",
+    lastCheckedAt: credentials?.lastCheckedAt,
+    lastSuccessAt: credentials?.lastSuccessAt,
+    lastFailureReason: credentials?.lastFailureReason,
+    apiKeyPreview: credentials ? maskApiKey(decryptSecret(credentials.encryptedApiKey)) : null
+  };
+}
+
+async function planStatus(shopId: string) {
+  const shop = await prisma.shop.findUniqueOrThrow({ where: { id: shopId } });
+  const usage = await getPlanUsage(shop.id, shop.planName);
+  return {
+    currentPlan: shop.planName,
+    planStatus: shop.planStatus,
+    allowance: planLimit(shop.planName),
+    usage: { month: usage.month, count: usage.count, limit: usage.limit },
+    plans: PLAN_LIMITS,
+    manageUrl: `https://${shop.domain}/admin/charges/${env.SHOPIFY_API_KEY}/pricing_plans`
+  };
+}
 
 adminRouter.get("/dashboard", async (req, res) => {
   const shop = req.shop!;
@@ -63,14 +107,7 @@ adminRouter.put("/automation", async (req, res) => {
 
 adminRouter.get("/shipstation", async (req, res) => {
   const credentials = await prisma.shipStationCredential.findUnique({ where: { shopId: req.shop!.id } });
-  res.json({
-    configured: Boolean(credentials),
-    connectionStatus: credentials?.connectionStatus || "missing",
-    lastCheckedAt: credentials?.lastCheckedAt,
-    lastSuccessAt: credentials?.lastSuccessAt,
-    lastFailureReason: credentials?.lastFailureReason,
-    apiKeyPreview: credentials ? "saved" : null
-  });
+  res.json(shipStationCredentialSummary(credentials));
 });
 
 adminRouter.put("/shipstation", async (req, res) => {
@@ -90,7 +127,7 @@ adminRouter.put("/shipstation", async (req, res) => {
     }
   });
   await prisma.appEvent.create({ data: { shopId: req.shop!.id, eventType: "shipstation_credentials_saved", message: "ShipStation credentials saved" } });
-  res.json({ configured: true, connectionStatus: credentials.connectionStatus });
+  res.json(shipStationCredentialSummary(credentials));
 });
 
 adminRouter.post("/shipstation/test", async (req, res) => {
@@ -105,7 +142,7 @@ adminRouter.post("/shipstation/test", async (req, res) => {
       where: { shopId: req.shop!.id },
       data: { connectionStatus: "connected", lastCheckedAt: new Date(), lastSuccessAt: new Date(), lastFailureReason: null }
     });
-    res.json(updated);
+    res.json(shipStationCredentialSummary(updated));
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown ShipStation connection failure";
     const updated = await prisma.shipStationCredential.update({
@@ -120,7 +157,7 @@ adminRouter.post("/shipstation/test", async (req, res) => {
       subject: "ShipRelease ShipStation connection failed",
       text: `ShipRelease could not authenticate with ShipStation for ${req.shop!.domain}.\n\n${reason}`
     });
-    res.status(400).json(updated);
+    res.status(400).json(shipStationCredentialSummary(updated));
   }
 });
 
@@ -132,15 +169,12 @@ adminRouter.get("/plans", async (req, res) => {
   } catch {
     // Surface cached plan data when Shopify managed pricing cannot be refreshed.
   }
-  const usage = await getPlanUsage(shop.id, shop.planName);
-  res.json({
-    currentPlan: shop.planName,
-    planStatus: shop.planStatus,
-    allowance: planLimit(shop.planName),
-    usage: { month: usage.month, count: usage.count, limit: usage.limit },
-    plans: PLAN_LIMITS,
-    manageUrl: `https://${shop.domain}/admin/charges/${env.SHOPIFY_API_KEY}/pricing_plans`
-  });
+  res.json(await planStatus(shop.id));
+});
+
+adminRouter.post("/plans/refresh", async (req, res) => {
+  await syncManagedPricing(req.shop!.id);
+  res.json(await planStatus(req.shop!.id));
 });
 
 adminRouter.get("/support", async (req, res) => {
