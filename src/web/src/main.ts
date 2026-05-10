@@ -1,3 +1,4 @@
+import shipreleaseLogoUrl from "./assets/shiprelease-logo.png";
 import "./styles.css";
 
 declare global {
@@ -49,7 +50,7 @@ function shell(content: string) {
     <div class="app-shell">
       <div class="topbar">
         <div class="brand-lockup">
-          <span class="brand-mark" aria-hidden="true"></span>
+          <img src="${shipreleaseLogoUrl}" alt="ShipRelease" class="brand-logo" />
           <div>
             <h1>ShipRelease</h1>
             <p>Automate unpaid order release into ShipStation</p>

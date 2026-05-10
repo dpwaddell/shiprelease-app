@@ -1125,3 +1125,41 @@ h3 {
     grid-template-columns: 1fr;
   }
 }
+
+.brand-logo {
+  width: 58px !important;
+  height: 58px !important;
+  max-width: 58px !important;
+  max-height: 58px !important;
+  object-fit: contain;
+  display: block;
+  flex: 0 0 58px;
+}
+
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.brand-logo {
+  width: 88px !important;
+  height: 88px !important;
+  max-width: 88px !important;
+  max-height: 88px !important;
+  flex: 0 0 88px !important;
+}
+
+.brand-lockup {
+  gap: 16px !important;
+}
+
+.brand-lockup h1 {
+  font-size: 40px;
+  line-height: 1;
+  margin-bottom: 8px;
+}
+
+.topbar {
+  padding-top: 18px !important;
+  padding-bottom: 18px !important;
+}
