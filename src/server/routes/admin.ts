@@ -214,6 +214,15 @@ adminRouter.get("/dashboard", async (req, res) => {
       paused: Boolean(settings?.automationPaused),
       pausedAt: settings?.automationPausedAt || null
     },
+    shipstation: {
+      configured: Boolean(credentials),
+      connectionStatus: credentials?.connectionStatus || "missing",
+      lastSuccessAt: credentials?.lastSuccessAt || null
+    },
+    plan: {
+      name: shop.planName,
+      status: shop.planStatus
+    },
     usage: { count: usage.count, limit: usage.limit, month: usage.month },
     onboarding: { percent: Math.round((completed / checklist.length) * 100), checklist },
     failedJobs,

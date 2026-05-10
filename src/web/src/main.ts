@@ -63,11 +63,12 @@ function shell(content: string) {
 }
 
 function metric(label: string, value: string, sub = "") {
-  return `<section class="metric"><span>${label}</span><strong>${value}</strong><small>${sub}</small></section>`;
+  return `<section class="metric"><span>${label}</span><strong>${value}</strong>${sub ? `<small>${sub}</small>` : ""}</section>`;
 }
 
 function statusBadge(status: string) {
-  return `<span class="status ${status}">${status}</span>`;
+  const label = status.replaceAll("_", " ");
+  return `<span class="status ${status}">${label}</span>`;
 }
 
 function emptyState(title: string, detail: string) {
@@ -76,6 +77,22 @@ function emptyState(title: string, detail: string) {
 
 function when(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : "No activity yet";
+}
+
+function compactWhen(value: string | null | undefined) {
+  return value ? new Date(value).toLocaleString() : "None recorded";
+}
+
+function pageIntro(title: string, detail: string) {
+  return `<section class="page-intro"><div><h2>${title}</h2><p>${detail}</p></div></section>`;
+}
+
+function fieldHelp(text: string) {
+  return `<span class="field-help">${text}</span>`;
+}
+
+function textareaLines(values: string[] | undefined) {
+  return (values || []).join("\n");
 }
 
 function dashboard(data: any) {
@@ -115,17 +132,27 @@ function dashboard(data: any) {
       <td class="row-actions"><button type="button" data-release-detail="${job.id}">Details</button></td>
     </tr>
   `).join("");
+  const shipstationStatus = data.shipstation?.connectionStatus || "missing";
+  const planStatus = `${data.plan?.name || "unknown"} / ${data.plan?.status || "inactive"}`;
   shell(`
-    <section class="ops-banner ${data.automation?.paused ? "paused" : "active"}">
-      <div>
-        <strong>${data.automation?.paused ? "Automation paused" : "Automation active"}</strong>
-        <span>${data.automation?.paused ? "No release jobs will be queued. Simulator and audit logging remain available." : "Release jobs can be queued when rules match."}</span>
+    <section class="ops-hero ${data.automation?.paused ? "paused" : "active"}">
+      <div class="ops-hero-copy">
+        <span class="eyebrow">Operations Control Centre</span>
+        <h2>${data.automation?.paused ? "Automation paused" : "Automation active"}</h2>
+        <p>${data.automation?.paused ? "New releases are stopped. Existing queued work is deferred safely, and audit logging remains active." : "Eligible orders are being monitored, queued, and released into ShipStation."}</p>
       </div>
-      <div class="actions">
+      <div class="ops-hero-actions">
         ${data.automation?.paused ? `<button type="button" id="resume-automation">Automation active</button>` : `<button type="button" id="pause-automation">Pause all releases</button>`}
         <button type="button" id="run-reconciliation">Run reconciliation</button>
       </div>
     </section>
+    <div class="status-strip">
+      <section>${statusBadge(data.automation?.paused ? "paused" : "active")}<strong>${data.automation?.paused ? "Paused" : "Active"}</strong><span>Automation</span></section>
+      <section>${statusBadge(shipstationStatus)}<strong>${shipstationStatus.replaceAll("_", " ")}</strong><span>ShipStation</span></section>
+      <section>${statusBadge(data.plan?.status || "inactive")}<strong>${planStatus}</strong><span>Managed plan</span></section>
+      <section>${statusBadge((data.importWaitingJobs || []).length ? "pending" : "success")}<strong>${(data.importWaitingJobs || []).length}</strong><span>Waiting imports</span></section>
+      <section>${statusBadge(data.metrics?.lastSuccessfulReleaseAt ? "success" : "info")}<strong>${compactWhen(data.metrics?.lastSuccessfulReleaseAt)}</strong><span>Last release</span></section>
+    </div>
     <div class="grid metrics-grid">
       ${metric("Releases today", String(data.metrics?.releasesToday || 0))}
       ${metric("Releases this month", String(data.metrics?.releasesThisMonth || 0))}
@@ -240,32 +267,54 @@ function checkboxes(name: string, values: string[], selected: string[]) {
 
 function automation(data: any) {
   shell(`
-    <form class="panel form" id="automation-form">
-      <h2>Automation rules</h2>
-      <p class="helper">These settings are persisted now and structured so release conditions can expand without reworking the workflow.</p>
-      <label class="check"><input type="checkbox" name="enabled" ${data.enabled ? "checked" : ""}>Automation enabled</label>
-      <label class="check"><input type="checkbox" name="releaseOnlyFullyPaid" ${data.releaseOnlyFullyPaid ? "checked" : ""}>Release only fully paid orders</label>
-      <label class="check"><input type="checkbox" name="ignoreHighRiskOrders" ${data.ignoreHighRiskOrders ? "checked" : ""}>Ignore high risk orders</label>
-      <label class="check"><input type="checkbox" name="requireManualReviewAboveAmount" ${data.requireManualReviewAboveAmount ? "checked" : ""}>Require manual review above amount</label>
-      <label>Manual review amount<input name="manualReviewAmount" value="${data.manualReviewAmount || 0}" type="number" min="0" step="0.01"></label>
-      <label>Rule engine delay minutes<input name="delayMinutes" value="${data.delayMinutes || data.releaseDelayMinutes || 0}" type="number" min="0" max="1440"></label>
-      <fieldset><legend>Eligible financial statuses</legend>${checkboxes("financialStatuses", ["pending", "unpaid", "partially_paid"], data.financialStatuses || [])}</fieldset>
-      <label>Payment methods or gateway text<textarea name="paymentMethods">${(data.paymentMethods || []).join("\n")}</textarea></label>
-      <label>Include tags<textarea name="includeTags">${(data.includeTags || []).join("\n")}</textarea></label>
-      <label>Exclude tags<textarea name="excludeTags">${(data.excludeTags || []).join("\n")}</textarea></label>
-      <label>Release delay<select name="releaseDelayMinutes">
-        ${[[0, "Immediate"], [5, "5 minutes"], [15, "15 minutes"], [60, "1 hour"]].map(([value, label]) => `<option value="${value}" ${data.releaseDelayMinutes === value ? "selected" : ""}>${label}</option>`).join("")}
-      </select></label>
-      <label>Notification email<input name="notificationEmail" value="${data.notificationEmail || ""}" type="email"></label>
-      <fieldset><legend>Operational notifications</legend>
-        <label class="check"><input type="checkbox" name="notifyAutomationPaused" ${data.notifyAutomationPaused ? "checked" : ""}>Automation paused</label>
-        <label class="check"><input type="checkbox" name="notifyReconciliationFixes" ${data.notifyReconciliationFixes ? "checked" : ""}>Reconciliation queued fixes</label>
-        <label class="check"><input type="checkbox" name="notifyRepeatedFailures" ${data.notifyRepeatedFailures ? "checked" : ""}>Repeated release failures</label>
-        <label class="check"><input type="checkbox" name="notifyWebhookFailures" ${data.notifyWebhookFailures ? "checked" : ""}>Webhook processing failures</label>
-      </fieldset>
-      <label>Repeated failure threshold<input name="repeatedFailureThreshold" value="${data.repeatedFailureThreshold || 3}" type="number" min="1" max="20"></label>
-      <label>Notification debounce minutes<input name="notificationDebounceMinutes" value="${data.notificationDebounceMinutes || 60}" type="number" min="5" max="1440"></label>
-      <div class="actions"><button type="submit">Save settings</button></div>
+    ${pageIntro("Automation rules", "Control which orders ShipRelease can release and when operators should be notified.")}
+    <form class="form stacked-form" id="automation-form">
+      <section class="panel form-card">
+        <div class="panel-heading"><div><h2>Automation status</h2><p>Turn release automation on or keep rules saved while disabled.</p></div>${statusBadge(data.enabled ? "active" : "inactive")}</div>
+        <div class="check-grid">
+          <label class="check"><input type="checkbox" name="enabled" ${data.enabled ? "checked" : ""}>Automation enabled</label>
+        </div>
+      </section>
+      <section class="panel form-card">
+        <div class="panel-heading"><div><h2>Order eligibility</h2><p>Choose the order states and safeguards that must pass before queueing.</p></div></div>
+        <fieldset><legend>Eligible financial statuses</legend><div class="check-grid">${checkboxes("financialStatuses", ["pending", "unpaid", "partially_paid"], data.financialStatuses || [])}</div></fieldset>
+        <div class="check-grid">
+          <label class="check"><input type="checkbox" name="releaseOnlyFullyPaid" ${data.releaseOnlyFullyPaid ? "checked" : ""}>Release only fully paid orders</label>
+          <label class="check"><input type="checkbox" name="ignoreHighRiskOrders" ${data.ignoreHighRiskOrders ? "checked" : ""}>Ignore high risk orders</label>
+          <label class="check"><input type="checkbox" name="requireManualReviewAboveAmount" ${data.requireManualReviewAboveAmount ? "checked" : ""}>Require manual review above amount</label>
+        </div>
+        <label>Manual review amount${fieldHelp("Orders above this total stay blocked when manual review is enabled.")}<input name="manualReviewAmount" value="${data.manualReviewAmount || 0}" type="number" min="0" step="0.01"></label>
+      </section>
+      <section class="panel form-card">
+        <div class="panel-heading"><div><h2>Payment methods and tags</h2><p>Match the gateway text and tags your Shopify operations team already uses.</p></div></div>
+        <label>Payment methods or gateway text${fieldHelp("One per line. Example: Manual Payment, Bank Deposit, Net Terms.")}<textarea name="paymentMethods" placeholder="Manual Payment&#10;Bank Deposit&#10;Net Terms">${textareaLines(data.paymentMethods)}</textarea></label>
+        <label>Include tags${fieldHelp("Optional. If set, an order must include at least one of these tags.")}<textarea name="includeTags" placeholder="wholesale&#10;approved-account">${textareaLines(data.includeTags)}</textarea></label>
+        <label>Exclude tags${fieldHelp("One per line. Matching orders are ignored by automation.")}<textarea name="excludeTags" placeholder="fraud&#10;review&#10;sampleguard:hold">${textareaLines(data.excludeTags)}</textarea></label>
+      </section>
+      <section class="panel form-card">
+        <div class="panel-heading"><div><h2>Release timing</h2><p>Use delays when ShipStation or internal review workflows need a short buffer.</p></div></div>
+        <div class="form-grid">
+          <label>Rule engine delay minutes${fieldHelp("Additional delay before processing a matching order.")}<input name="delayMinutes" value="${data.delayMinutes || data.releaseDelayMinutes || 0}" type="number" min="0" max="1440"></label>
+          <label>Release delay${fieldHelp("Preset queue delay for eligible releases.")}<select name="releaseDelayMinutes">
+            ${[[0, "Immediate"], [5, "5 minutes"], [15, "15 minutes"], [60, "1 hour"]].map(([value, label]) => `<option value="${value}" ${data.releaseDelayMinutes === value ? "selected" : ""}>${label}</option>`).join("")}
+          </select></label>
+        </div>
+      </section>
+      <section class="panel form-card">
+        <div class="panel-heading"><div><h2>Notifications</h2><p>Send operational alerts without spamming repeated incidents.</p></div></div>
+        <label>Notification email<input name="notificationEmail" value="${data.notificationEmail || ""}" type="email" placeholder="ops@example.com"></label>
+        <fieldset><legend>Notify for</legend><div class="check-grid">
+          <label class="check"><input type="checkbox" name="notifyAutomationPaused" ${data.notifyAutomationPaused ? "checked" : ""}>Automation paused</label>
+          <label class="check"><input type="checkbox" name="notifyReconciliationFixes" ${data.notifyReconciliationFixes ? "checked" : ""}>Reconciliation queued fixes</label>
+          <label class="check"><input type="checkbox" name="notifyRepeatedFailures" ${data.notifyRepeatedFailures ? "checked" : ""}>Repeated release failures</label>
+          <label class="check"><input type="checkbox" name="notifyWebhookFailures" ${data.notifyWebhookFailures ? "checked" : ""}>Webhook processing failures</label>
+        </div></fieldset>
+        <div class="form-grid">
+          <label>Repeated failure threshold<input name="repeatedFailureThreshold" value="${data.repeatedFailureThreshold || 3}" type="number" min="1" max="20"></label>
+          <label>Notification debounce minutes<input name="notificationDebounceMinutes" value="${data.notificationDebounceMinutes || 60}" type="number" min="5" max="1440"></label>
+        </div>
+      </section>
+      <div class="sticky-actions"><button type="submit">Save settings</button></div>
     </form>
   `);
   document.querySelector<HTMLFormElement>("#automation-form")!.onsubmit = async (event) => {
@@ -302,7 +351,7 @@ function automation(data: any) {
 
 function simulator(data: any = {}) {
   const result = data.result ? `
-    <section class="panel simulator-result">
+    <section class="panel simulator-result result-card">
       <div class="panel-heading"><div><h2>Dry run result</h2><p>No ShipStation release call was made.</p></div>${statusBadge(data.result.decision === "would_release" ? "success" : "info")}</div>
       <dl>
         <dt>Webhook detected</dt><dd>${data.result.webhookDetected}</dd>
@@ -314,17 +363,19 @@ function simulator(data: any = {}) {
     </section>
   ` : "";
   shell(`
-    <section class="panel">
-      <h2>Release Simulator</h2>
-      <p class="helper">Run a dry release workflow for an order number or ID. This creates no real queue job and never calls ShipStation.</p>
+    ${pageIntro("Release simulator", "Test an order against the current rule set without queueing a job or calling ShipStation.")}
+    <section class="panel form-card">
+      <div class="panel-heading"><div><h2>Dry run inputs</h2><p>Use a recent order shape or a hypothetical manual-payment order.</p></div>${statusBadge("info")}</div>
       <form class="form" id="simulator-form">
-        <label>Order number or ID<input name="orderId" required placeholder="#1001"></label>
-        <label>Display name<input name="orderName" placeholder="#1001"></label>
-        <label>Financial status<select name="financialStatus"><option value="pending">pending</option><option value="unpaid">unpaid</option><option value="paid">paid</option><option value="partially_paid">partially_paid</option></select></label>
-        <label>Gateway<input name="gateway" value="Manual Payment"></label>
-        <label>Tags<input name="tags" placeholder="wholesale, review"></label>
-        <label>Total price<input name="totalPrice" value="0" type="number" min="0" step="0.01"></label>
-        <label>Risk level<select name="riskLevel"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
+        <div class="form-grid">
+          <label>Order number or ID<input name="orderId" required placeholder="#1001"></label>
+          <label>Display name<input name="orderName" placeholder="#1001"></label>
+          <label>Financial status<select name="financialStatus"><option value="pending">pending</option><option value="unpaid">unpaid</option><option value="paid">paid</option><option value="partially_paid">partially_paid</option></select></label>
+          <label>Gateway<input name="gateway" value="Manual Payment"></label>
+          <label>Tags<input name="tags" placeholder="wholesale, review"></label>
+          <label>Total price<input name="totalPrice" value="0" type="number" min="0" step="0.01"></label>
+          <label>Risk level<select name="riskLevel"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
+        </div>
         <div class="actions"><button type="submit">Run dry run</button></div>
       </form>
     </section>
@@ -353,22 +404,24 @@ function simulator(data: any = {}) {
 
 function shipstation(data: any) {
   const savedCredentials = data.configured ? `
-    <div class="credential-summary">
-      <strong>Credentials saved securely</strong>
-      <span>API key: ${data.apiKeyPreview || "saved"}</span>
-      <span>API secret: saved securely and never displayed</span>
-      <small>Entering a new API key and API secret will replace the saved credentials.</small>
+    <div class="credential-summary premium-summary">
+      <div><strong>Credentials saved securely</strong><span>API key: ${data.apiKeyPreview || "saved"}</span></div>
+      <div><strong>API secret</strong><span>Saved securely and never displayed</span></div>
     </div>
   ` : `
-    <div class="credential-summary">
-      <strong>No ShipStation credentials saved</strong>
-      <span>Add your API key and API secret to enable releases.</span>
+    <div class="credential-summary premium-summary">
+      <div><strong>No ShipStation credentials saved</strong><span>Add your API key and API secret to enable releases.</span></div>
     </div>
   `;
   shell(`
-    <section class="panel">
-      <div class="split"><div><h2>Connection</h2><p>Status: <span class="status ${data.connectionStatus}">${data.connectionStatus}</span></p><p>Last success: ${data.lastSuccessAt ? new Date(data.lastSuccessAt).toLocaleString() : "-"}</p><p>${data.lastFailureReason || ""}</p></div></div>
+    ${pageIntro("ShipStation connection", "Connect the ShipStation account that receives imported Shopify orders. Secrets are encrypted and never shown again.")}
+    <section class="panel connection-card">
+      <div class="panel-heading"><div><h2>Connection status</h2><p>Last success: ${data.lastSuccessAt ? new Date(data.lastSuccessAt).toLocaleString() : "No successful test recorded"}</p></div>${statusBadge(data.connectionStatus)}</div>
+      ${data.lastFailureReason ? `<div class="inline-warning">${data.lastFailureReason}</div>` : ""}
       ${savedCredentials}
+    </section>
+    <section class="panel form-card">
+      <div class="panel-heading"><div><h2>${data.configured ? "Replace credentials" : "Save credentials"}</h2><p>${data.configured ? "Enter both fields to replace the stored ShipStation credentials. Existing secrets are not displayed." : "Add API credentials from ShipStation to enable release automation."}</p></div></div>
       <form class="form" id="shipstation-form">
         <label>API key<input name="apiKey" autocomplete="off" placeholder="${data.configured ? "Enter a new API key to replace saved credentials" : ""}" required></label>
         <label>API secret<input name="apiSecret" type="password" autocomplete="new-password" placeholder="${data.configured ? "Enter a new API secret to replace saved credentials" : ""}" required></label>
@@ -391,21 +444,26 @@ function shipstation(data: any) {
 }
 
 function plans(data: any) {
-  const planRows = Object.entries(data.plans || {}).map(([name, limit]) => `<tr><td>${name}</td><td>${limit} releases/month</td></tr>`).join("");
+  const planRows = Object.entries(data.plans || {}).map(([name, limit]) => `
+    <section class="plan-card ${String(data.currentPlan || "").toLowerCase() === String(name).toLowerCase() ? "current" : ""}">
+      <span>${name}</span>
+      <strong>${Number(limit) === 0 ? "Custom" : Number(limit).toLocaleString()}</strong>
+      <small>${Number(limit) === 0 ? "Contact support" : "releases/month"}</small>
+    </section>
+  `).join("");
   const inactivePlan = !data.currentPlan || data.currentPlan === "unknown" || data.planStatus !== "active";
   const planNotice = inactivePlan ? `
     <div class="plan-notice">
       <strong>No active Shopify managed plan detected yet.</strong>
-      <span>This can happen immediately after install or before selecting a plan.</span>
+      <span>This can happen immediately after install or before selecting a plan in Shopify.</span>
     </div>
   ` : "";
   shell(`
+    ${pageIntro("Managed pricing", "ShipRelease reads subscription status from Shopify Managed Pricing. Billing is managed in Shopify.")}
     <section class="panel">
-      <h2>Managed Pricing</h2>
+      <div class="panel-heading"><div><h2>Current plan</h2><p>Usage this month: ${data.usage?.count || 0} / ${data.allowance || 0}</p></div>${statusBadge(data.planStatus || "inactive")}</div>
       ${planNotice}
-      <p>Current plan: <strong>${data.currentPlan}</strong> (${data.planStatus})</p>
-      <p>Usage this month: ${data.usage?.count || 0} / ${data.allowance || 0}</p>
-      <table><tbody>${planRows}</tbody></table>
+      <div class="plan-grid">${planRows}</div>
       <div class="actions"><button type="button" id="refresh-plan">Refresh plan status</button><a class="button" href="${data.manageUrl}" target="_top">Manage plan in Shopify</a></div>
     </section>
   `);
@@ -419,10 +477,9 @@ function plans(data: any) {
 function support(data: any) {
   const diag = data.diagnostics || {};
   shell(`
-    <section class="panel">
-      <h2>Support</h2>
-      <p>When asking for help, include the Shopify order name, approximate release time, and any ShipStation order reference.</p>
-      <p>Email: <a href="mailto:${data.supportEmail}">${data.supportEmail}</a></p>
+    ${pageIntro("Support", "Share the order number, ShipStation reference, approximate time, and a screenshot when asking for help.")}
+    <section class="panel support-card">
+      <div class="panel-heading"><div><h2>Merchant support pack</h2><p>Email: <a href="mailto:${data.supportEmail}">${data.supportEmail}</a></p></div>${statusBadge(diag.automationEnabled ? "active" : "inactive")}</div>
       <dl>
         <dt>Shop domain</dt><dd>${diag.shopDomain}</dd>
         <dt>Plan</dt><dd>${diag.plan}</dd>
