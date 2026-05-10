@@ -11,9 +11,17 @@ export const webhookRouter = express.Router();
 
 webhookRouter.use(express.raw({ type: "application/json" }));
 
-webhookRouter.post("/orders", async (req, res) => {
+function verifyWebhookRequest(req: express.Request, res: express.Response) {
   const hmac = req.get("x-shopify-hmac-sha256");
-  if (!verifyShopifyWebhook(req.body, hmac || undefined)) return res.status(401).send("Invalid HMAC");
+  if (!Buffer.isBuffer(req.body) || !verifyShopifyWebhook(req.body, hmac || undefined)) {
+    res.status(401).send("Invalid HMAC");
+    return false;
+  }
+  return true;
+}
+
+async function handleOrderWebhook(req: express.Request, res: express.Response) {
+  if (!verifyWebhookRequest(req, res)) return;
   res.status(200).send("OK");
 
   try {
@@ -69,11 +77,10 @@ webhookRouter.post("/orders", async (req, res) => {
       });
     }
   }
-});
+}
 
-webhookRouter.post("/app-uninstalled", async (req, res) => {
-  const hmac = req.get("x-shopify-hmac-sha256");
-  if (!verifyShopifyWebhook(req.body, hmac || undefined)) return res.status(401).send("Invalid HMAC");
+async function handleAppUninstalledWebhook(req: express.Request, res: express.Response) {
+  if (!verifyWebhookRequest(req, res)) return;
   res.status(200).send("OK");
   const shopDomain = req.get("x-shopify-shop-domain");
   if (!shopDomain) return;
@@ -81,11 +88,10 @@ webhookRouter.post("/app-uninstalled", async (req, res) => {
     where: { domain: normalizeShopDomain(shopDomain) },
     data: { uninstalledAt: new Date(), accessToken: "uninstalled", planStatus: "inactive" }
   });
-});
+}
 
-webhookRouter.post("/compliance", async (req, res) => {
-  const hmac = req.get("x-shopify-hmac-sha256");
-  if (!verifyShopifyWebhook(req.body, hmac || undefined)) return res.status(401).send("Invalid HMAC");
+async function handleComplianceWebhook(req: express.Request, res: express.Response) {
+  if (!verifyWebhookRequest(req, res)) return;
   res.status(200).send("OK");
   await prisma.appEvent.create({
     data: {
@@ -94,4 +100,14 @@ webhookRouter.post("/compliance", async (req, res) => {
       metadata: { shop: req.get("x-shopify-shop-domain") || null }
     }
   });
-});
+}
+
+webhookRouter.post("/orders", handleOrderWebhook);
+webhookRouter.post("/app/uninstalled", handleAppUninstalledWebhook);
+webhookRouter.post("/customers/data_request", handleComplianceWebhook);
+webhookRouter.post("/customers/redact", handleComplianceWebhook);
+webhookRouter.post("/shop/redact", handleComplianceWebhook);
+
+// Compatibility aliases for existing deployed webhook registrations.
+webhookRouter.post("/app-uninstalled", handleAppUninstalledWebhook);
+webhookRouter.post("/compliance", handleComplianceWebhook);

@@ -151,7 +151,7 @@ cat <<'STEPS'
 1. Create a production .env from .env.example and fill real secrets.
 2. Set Shopify app URL to https://shiprelease.sample-guard.com.
 3. Set allowed redirect URL to https://shiprelease.sample-guard.com/auth/callback.
-4. Configure webhooks for /webhooks/orders, /webhooks/app-uninstalled, and /webhooks/compliance using API version 2026-04.
+4. Configure webhooks from shopify.app.toml: /webhooks/orders, /webhooks/app/uninstalled, /webhooks/customers/data_request, /webhooks/customers/redact, and /webhooks/shop/redact using API version 2026-04.
 5. Configure Shopify Managed Pricing plans: Starter, Pro, Scale with a 14-day trial.
 6. Run docker compose build && docker compose up -d on the deployment host.
 7. Install the app on a real development store and test OAuth, embedded admin, ShipStation connection, and order webhooks.
