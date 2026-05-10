@@ -42,6 +42,7 @@ export function beginOAuth(req: Request, res: Response) {
     state,
     "grant_options[]": "per-user"
   });
+  console.log("AUTH_REDIRECT_INITIATED", JSON.stringify({ shop, route: req.path }));
   res.redirect(`https://${shop}/admin/oauth/authorize?${params.toString()}`);
 }
 
@@ -64,6 +65,7 @@ export async function finishOAuth(req: Request, res: Response) {
   if (!tokenResponse.ok) return res.status(502).send("OAuth token exchange failed");
   const token = await tokenResponse.json() as { access_token: string; scope: string };
 
+  const existing = await prisma.shop.findUnique({ where: { domain: shop }, select: { id: true, uninstalledAt: true } });
   const record = await prisma.shop.upsert({
     where: { domain: shop },
     update: {
@@ -78,6 +80,12 @@ export async function finishOAuth(req: Request, res: Response) {
       scope: token.scope
     }
   });
+  console.log("SHOP_ROW_CREATED_OR_UPDATED_AFTER_OAUTH", JSON.stringify({
+    shop,
+    shopId: record.id,
+    action: existing ? "updated" : "created",
+    wasUninstalled: Boolean(existing?.uninstalledAt)
+  }));
 
   await prisma.automationSetting.upsert({
     where: { shopId: record.id },
@@ -108,7 +116,20 @@ export async function requireShopSession(req: Request, res: Response, next: Next
     const payload = verifySessionToken(token);
     const shop = normalizeShopDomain(String(payload.dest || payload.iss || "").replace(/^https?:\/\//, ""));
     const record = await prisma.shop.findUnique({ where: { domain: shop } });
-    if (!record || record.uninstalledAt) return res.status(401).json({ error: "Shop is not installed" });
+    if (!record || record.uninstalledAt) {
+      const installUrl = `${env.SHOPIFY_APP_URL}/auth?shop=${encodeURIComponent(shop)}`;
+      console.warn("MISSING_SHOP_ROW", JSON.stringify({
+        shop,
+        route: req.originalUrl,
+        reason: record?.uninstalledAt ? "shop_marked_uninstalled" : "shop_row_missing"
+      }));
+      console.log("AUTH_REDIRECT_INITIATED", JSON.stringify({ shop, route: req.originalUrl, installUrl }));
+      return res.status(401).json({
+        error: "Installation needs to be completed. Reopen the app from Shopify admin or start installation again.",
+        code: "INSTALLATION_REQUIRED",
+        installUrl
+      });
+    }
     req.shop = record;
     next();
   } catch (error) {

@@ -9,6 +9,8 @@ declare global {
 
 type Tab = "dashboard" | "automation" | "shipstation" | "simulator" | "plans" | "support";
 
+const INSTALL_FALLBACK_MESSAGE = "Installation needs to be completed. Reopen the app from Shopify admin or start installation again.";
+
 const state: { tab: Tab; data: Record<string, unknown>; message?: string } = {
   tab: "dashboard",
   data: {}
@@ -37,8 +39,23 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers || {})
     }
   });
-  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || response.statusText);
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    if (payload?.code === "INSTALLATION_REQUIRED" && payload.installUrl) {
+      redirectToInstall(payload.installUrl);
+      throw new Error(INSTALL_FALLBACK_MESSAGE);
+    }
+    throw new Error(payload.error || response.statusText);
+  }
   return response.json() as Promise<T>;
+}
+
+function redirectToInstall(installUrl: string) {
+  try {
+    window.top!.location.href = installUrl;
+  } catch {
+    window.location.href = installUrl;
+  }
 }
 
 function app() {
@@ -627,7 +644,13 @@ async function load(tab: Tab) {
     if (tab === "plans") plans(data);
     if (tab === "support") support(data);
   } catch (error) {
-    shell(`<section class="panel error">${error instanceof Error ? error.message : "Failed to load"}</section>`);
+    const message = error instanceof Error ? error.message : "Failed to load";
+    shell(`
+      <section class="panel error">
+        <h2>${message === INSTALL_FALLBACK_MESSAGE ? "Installation needs to be completed" : "Unable to load ShipRelease"}</h2>
+        <p>${message}</p>
+      </section>
+    `);
   }
 }
 
