@@ -9,7 +9,15 @@ declare global {
 
 type Tab = "dashboard" | "automation" | "shipstation" | "simulator" | "plans" | "support";
 
-const INSTALL_FALLBACK_MESSAGE = "Installation needs to be completed. Reopen the app from Shopify admin or start installation again.";
+const INSTALL_REDIRECT_TITLE = "Completing installation…";
+const INSTALL_REDIRECT_MESSAGE = "Redirecting securely to Shopify to finish setup.";
+
+class InstallationRedirectError extends Error {
+  constructor() {
+    super(INSTALL_REDIRECT_MESSAGE);
+    this.name = "InstallationRedirectError";
+  }
+}
 
 const state: { tab: Tab; data: Record<string, unknown>; message?: string } = {
   tab: "dashboard",
@@ -42,8 +50,10 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     if (payload?.code === "INSTALLATION_REQUIRED" && payload.installUrl) {
-      redirectToInstall(payload.installUrl);
-      throw new Error(INSTALL_FALLBACK_MESSAGE);
+      if (redirectToInstall(payload.installUrl)) {
+        throw new InstallationRedirectError();
+      }
+      throw new Error("Unable to start Shopify installation. Reopen the app from Shopify admin or start installation again.");
     }
     throw new Error(payload.error || response.statusText);
   }
@@ -53,8 +63,14 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 function redirectToInstall(installUrl: string) {
   try {
     window.top!.location.href = installUrl;
+    return true;
   } catch {
-    window.location.href = installUrl;
+    try {
+      window.location.href = installUrl;
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -644,10 +660,19 @@ async function load(tab: Tab) {
     if (tab === "plans") plans(data);
     if (tab === "support") support(data);
   } catch (error) {
+    if (error instanceof InstallationRedirectError) {
+      shell(`
+        <section class="panel installation-redirect">
+          <h2>${INSTALL_REDIRECT_TITLE}</h2>
+          <p>${INSTALL_REDIRECT_MESSAGE}</p>
+        </section>
+      `);
+      return;
+    }
     const message = error instanceof Error ? error.message : "Failed to load";
     shell(`
       <section class="panel error">
-        <h2>${message === INSTALL_FALLBACK_MESSAGE ? "Installation needs to be completed" : "Unable to load ShipRelease"}</h2>
+        <h2>Unable to load ShipRelease</h2>
         <p>${message}</p>
       </section>
     `);

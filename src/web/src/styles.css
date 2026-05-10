@@ -759,6 +759,15 @@ textarea {
   color: #d72c0d;
 }
 
+.installation-redirect {
+  color: var(--text);
+}
+
+.installation-redirect p {
+  margin-top: 6px;
+  color: var(--subdued);
+}
+
 .empty-state {
   display: grid;
   justify-items: center;
