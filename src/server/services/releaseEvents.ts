@@ -7,6 +7,8 @@ export const RELEASE_EVENT_TYPES = [
   "payment_detected",
   "release_started",
   "release_deferred",
+  "shipstation_import_pending",
+  "shipstation_import_timeout",
   "release_success",
   "release_failed",
   "manual_release",

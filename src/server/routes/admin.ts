@@ -131,7 +131,7 @@ adminRouter.get("/dashboard", async (req, res) => {
     prisma.releaseEvent.count({ where: { shopId: shop.id, status: "failed" } }),
     prisma.releaseEvent.count({ where: { shopId: shop.id, eventType: "manual_retry", createdAt: { gte: startOfToday } } }),
     prisma.releaseJob.count({ where: { shopId: shop.id, status: "failed" } }),
-    prisma.releaseJob.count({ where: { shopId: shop.id, status: { in: ["queued", "retrying"] } } }),
+    prisma.releaseJob.count({ where: { shopId: shop.id, status: { in: ["queued", "retrying", "waiting_for_shipstation_import"] } } }),
     prisma.releaseEvent.findMany({
       where: { shopId: shop.id },
       orderBy: { createdAt: "desc" },
@@ -153,6 +153,20 @@ adminRouter.get("/dashboard", async (req, res) => {
     orderBy: { updatedAt: "desc" },
     take: 10,
     select: { id: true, shopifyOrderId: true, shopifyOrderName: true, failureReason: true, attempts: true, updatedAt: true, manualRetryCount: true }
+  });
+  const importWaitingJobs = await prisma.releaseJob.findMany({
+    where: { shopId: shop.id, status: "waiting_for_shipstation_import" },
+    orderBy: { nextShipstationLookupAt: "asc" },
+    take: 10,
+    select: {
+      id: true,
+      shopifyOrderId: true,
+      shopifyOrderName: true,
+      shipstationLookupAttempts: true,
+      lastShipstationLookupAt: true,
+      nextShipstationLookupAt: true,
+      shipstationImportWaitUntil: true
+    }
   });
   const recentWithActions = await Promise.all(recentActivity.map(async (event) => {
     const metadata = event.metadata && typeof event.metadata === "object" && !Array.isArray(event.metadata)
@@ -203,6 +217,7 @@ adminRouter.get("/dashboard", async (req, res) => {
     usage: { count: usage.count, limit: usage.limit, month: usage.month },
     onboarding: { percent: Math.round((completed / checklist.length) * 100), checklist },
     failedJobs,
+    importWaitingJobs,
     recentActivity: recentWithActions
   });
 });
@@ -345,6 +360,11 @@ adminRouter.get("/releases/:id", async (req, res) => {
       ruleEvaluation: release.ruleEvaluation,
       shipstationOrderId: release.shipstationOrderId,
       lookupCandidates: release.lookupCandidates,
+      shipstationLookupAttempts: release.shipstationLookupAttempts,
+      firstShipstationLookupAt: release.firstShipstationLookupAt,
+      lastShipstationLookupAt: release.lastShipstationLookupAt,
+      nextShipstationLookupAt: release.nextShipstationLookupAt,
+      shipstationImportWaitUntil: release.shipstationImportWaitUntil,
       metadata: {
         financialStatus: release.shopifyFinancialStatus,
         gateway: release.shopifyGateway,

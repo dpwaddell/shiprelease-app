@@ -45,6 +45,10 @@ async function maybeSendUsageWarnings(shopId: string) {
 }
 
 const PAUSED_RELEASE_DEFER_MINUTES = 15;
+const IMPORT_WAIT_FAST_RETRY_MINUTES = 2;
+const IMPORT_WAIT_SLOW_RETRY_MINUTES = 10;
+const IMPORT_WAIT_FAST_WINDOW_MS = 60 * 60 * 1000;
+const IMPORT_WAIT_TIMEOUT_MS = 5 * 60 * 60 * 1000;
 
 async function deferPausedRelease(job: Job<ReleaseJob>, releaseJob: NonNullable<Awaited<ReturnType<typeof prisma.releaseJob.findUnique>>>) {
   const runAt = new Date(Date.now() + PAUSED_RELEASE_DEFER_MINUTES * 60_000);
@@ -62,6 +66,103 @@ async function deferPausedRelease(job: Job<ReleaseJob>, releaseJob: NonNullable<
     metadata: { releaseJobId: releaseJob.id, deferredUntil: runAt.toISOString(), delayMinutes: PAUSED_RELEASE_DEFER_MINUTES }
   });
   await job.moveToDelayed(runAt.getTime(), job.token);
+  throw new DelayedError();
+}
+
+function importWaitDeadline(releaseJob: { queuedAt: Date; createdAt: Date }) {
+  return new Date((releaseJob.queuedAt || releaseJob.createdAt).getTime() + IMPORT_WAIT_TIMEOUT_MS);
+}
+
+function nextImportLookupAt(releaseJob: { queuedAt: Date; createdAt: Date }, now: Date, deadline: Date) {
+  const waitedMs = now.getTime() - (releaseJob.queuedAt || releaseJob.createdAt).getTime();
+  const delayMinutes = waitedMs < IMPORT_WAIT_FAST_WINDOW_MS ? IMPORT_WAIT_FAST_RETRY_MINUTES : IMPORT_WAIT_SLOW_RETRY_MINUTES;
+  const next = new Date(now.getTime() + delayMinutes * 60_000);
+  return next > deadline ? deadline : next;
+}
+
+async function deferShipStationImportLookup(
+  job: Job<ReleaseJob>,
+  releaseJob: NonNullable<Awaited<ReturnType<typeof prisma.releaseJob.findUnique>>>,
+  candidates: string[],
+  lookupAttempt: number
+) {
+  const now = new Date();
+  const deadline = importWaitDeadline(releaseJob);
+
+  if (now >= deadline) {
+    const reason = "ShipStation order was not imported within 5 hours.";
+    await prisma.releaseJob.update({
+      where: { id: releaseJob.id },
+      data: {
+        status: "failed",
+        failureReason: reason,
+        decisionReason: reason,
+        lastShipstationLookupAt: now,
+        nextShipstationLookupAt: null,
+        shipstationImportWaitUntil: deadline
+      }
+    });
+    await logReleaseEvent({
+      shopId: releaseJob.shopId,
+      orderId: releaseJob.shopifyOrderId,
+      orderName: releaseJob.shopifyOrderName,
+      eventType: "shipstation_import_timeout",
+      status: "failed",
+      message: reason,
+      metadata: { releaseJobId: releaseJob.id, lookupAttempts: lookupAttempt, importWaitUntil: deadline.toISOString(), lookupCandidates: candidates }
+    });
+    await logReleaseEvent({
+      shopId: releaseJob.shopId,
+      orderId: releaseJob.shopifyOrderId,
+      orderName: releaseJob.shopifyOrderName,
+      eventType: "release_failed",
+      status: "failed",
+      message: reason,
+      metadata: { releaseJobId: releaseJob.id, lookupAttempts: lookupAttempt }
+    });
+    const shop = await prisma.shop.findUnique({
+      where: { id: releaseJob.shopId },
+      include: { automationSettings: true }
+    });
+    await sendNotification({
+      shopId: releaseJob.shopId,
+      to: shop?.automationSettings?.notificationEmail,
+      eventType: "release_failed",
+      subject: "ShipRelease order release failed",
+      text: `ShipRelease could not find ${releaseJob.shopifyOrderName || releaseJob.shopifyOrderId} in ShipStation after waiting 5 hours for import.`,
+      debounceMinutes: shop?.automationSettings?.notificationDebounceMinutes
+    });
+    return;
+  }
+
+  const nextLookupAt = nextImportLookupAt(releaseJob, now, deadline);
+  await prisma.releaseJob.update({
+    where: { id: releaseJob.id },
+    data: {
+      status: "waiting_for_shipstation_import",
+      failureReason: null,
+      decisionReason: "Waiting for ShipStation import",
+      lastShipstationLookupAt: now,
+      nextShipstationLookupAt: nextLookupAt,
+      shipstationImportWaitUntil: deadline
+    }
+  });
+  await logReleaseEvent({
+    shopId: releaseJob.shopId,
+    orderId: releaseJob.shopifyOrderId,
+    orderName: releaseJob.shopifyOrderName,
+    eventType: "shipstation_import_pending",
+    status: "info",
+    message: "ShipStation has not imported the order yet. Lookup deferred.",
+    metadata: {
+      releaseJobId: releaseJob.id,
+      lookupAttempts: lookupAttempt,
+      nextLookupAt: nextLookupAt.toISOString(),
+      importWaitUntil: deadline.toISOString(),
+      lookupCandidates: candidates
+    }
+  });
+  await job.moveToDelayed(nextLookupAt.getTime(), job.token);
   throw new DelayedError();
 }
 
@@ -118,12 +219,23 @@ async function processRelease(job: Job<ReleaseJob>) {
     id: releaseJob.shopifyOrderId,
     name: releaseJob.shopifyOrderName
   });
+  const now = new Date();
+  const lookupAttempt = releaseJob.shipstationLookupAttempts + 1;
   await prisma.releaseJob.update({
     where: { id: releaseJob.id },
-    data: { lookupCandidates: candidates }
+    data: {
+      lookupCandidates: candidates,
+      shipstationLookupAttempts: { increment: 1 },
+      firstShipstationLookupAt: releaseJob.firstShipstationLookupAt || now,
+      lastShipstationLookupAt: now,
+      shipstationImportWaitUntil: importWaitDeadline(releaseJob)
+    }
   });
   const shipstationOrder = await locateShipStationOrder(auth, candidates);
-  if (!shipstationOrder) throw new Error(`No matching ShipStation order found for ${candidates.join(", ")}`);
+  if (!shipstationOrder) {
+    await deferShipStationImportLookup(job, releaseJob, candidates, lookupAttempt);
+    return;
+  }
 
   await releaseShipStationOrder(auth, shipstationOrder.orderId);
   const month = billingMonth();
@@ -134,7 +246,9 @@ async function processRelease(job: Job<ReleaseJob>) {
         status: "released",
         shipstationOrderId: String(shipstationOrder.orderId),
         releasedAt: new Date(),
-        failureReason: null
+        failureReason: null,
+        decisionReason: "ShipStation order found and released",
+        nextShipstationLookupAt: null
       }
     }),
     prisma.usageCounter.upsert({

@@ -15,7 +15,7 @@ type ShopifyOrder = {
   risk_level?: string;
 };
 
-const ACTIVE_JOB_STATUSES = ["queued", "retrying"] as const;
+const ACTIVE_JOB_STATUSES = ["queued", "retrying", "waiting_for_shipstation_import"] as const;
 
 export async function hasActiveReleaseJob(shopId: string, orderId: string) {
   return prisma.releaseJob.findFirst({

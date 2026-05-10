@@ -105,6 +105,16 @@ function dashboard(data: any) {
       <td class="row-actions"><button type="button" data-release-detail="${job.id}">Details</button><button type="button" data-release-retry="${job.id}">Retry</button></td>
     </tr>
   `).join("");
+  const importWaitingJobs = (data.importWaitingJobs || []).map((job: any) => `
+    <tr>
+      <td>${job.shopifyOrderName || job.shopifyOrderId}</td>
+      <td>${job.shipstationLookupAttempts || 0}</td>
+      <td>${when(job.lastShipstationLookupAt)}</td>
+      <td>${when(job.nextShipstationLookupAt)}</td>
+      <td>${when(job.shipstationImportWaitUntil)}</td>
+      <td class="row-actions"><button type="button" data-release-detail="${job.id}">Details</button></td>
+    </tr>
+  `).join("");
   shell(`
     <section class="ops-banner ${data.automation?.paused ? "paused" : "active"}">
       <div>
@@ -135,6 +145,10 @@ function dashboard(data: any) {
         ${metric("Active", String(queue.active || 0))}
         ${metric("Failed in queue", String(queue.failed || 0))}
       </div>
+    </section>
+    <section class="panel">
+      <div class="panel-heading"><div><h2>Waiting for ShipStation import</h2><p>Orders found by Shopify that have not appeared in ShipStation yet.</p></div></div>
+      ${importWaitingJobs ? `<table><thead><tr><th>Order</th><th>Lookups</th><th>Last checked</th><th>Next check</th><th>Timeout</th><th>Actions</th></tr></thead><tbody>${importWaitingJobs}</tbody></table>` : emptyState("No orders waiting for ShipStation import", "Import wait jobs appear here until ShipStation has imported the order or the wait times out.")}
     </section>
     <section class="panel">
       <div class="panel-heading"><div><h2>Failed releases requiring attention</h2><p>Manual retries create new queue jobs and preserve the original audit trail.</p></div></div>
@@ -202,6 +216,10 @@ async function showReleaseDetail(id: string) {
         <dt>Retry attempts</dt><dd>${release.retryAttempts || 0}</dd>
         <dt>Decision reason</dt><dd>${release.decisionReason || "Not recorded"}</dd>
         <dt>Failure reason</dt><dd>${release.failureReason || "None"}</dd>
+        <dt>Lookup attempts</dt><dd>${release.shipstationLookupAttempts || 0}</dd>
+        <dt>Last checked</dt><dd>${when(release.lastShipstationLookupAt)}</dd>
+        <dt>Next check</dt><dd>${when(release.nextShipstationLookupAt)}</dd>
+        <dt>Import timeout</dt><dd>${when(release.shipstationImportWaitUntil)}</dd>
         <dt>ShipStation candidates</dt><dd>${(release.lookupCandidates || []).join(", ") || "Not looked up yet"}</dd>
       </dl>
       <h3>Rule evaluation</h3>

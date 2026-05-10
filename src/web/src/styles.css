@@ -337,7 +337,7 @@ textarea {
   color: #d72c0d;
 }
 
-.status.queued, .status.retrying, .status.pending, .status.info {
+.status.queued, .status.retrying, .status.waiting_for_shipstation_import, .status.pending, .status.info {
   background: #fff5ea;
   color: #8a6116;
 }
