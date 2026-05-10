@@ -108,6 +108,10 @@ function textareaLines(values: string[] | undefined) {
   return (values || []).join("\n");
 }
 
+function mailto(to: string, subject: string, body: string) {
+  return `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
 function dashboard(data: any) {
   const rows = (data.recentActivity || []).map((event: any) => `
     <tr>
@@ -147,6 +151,7 @@ function dashboard(data: any) {
   `).join("");
   const shipstationStatus = data.shipstation?.connectionStatus || "missing";
   const waitingImports = (data.importWaitingJobs || []).length;
+  const planActive = data.plan?.name && data.plan.name !== "unknown" && data.plan?.status === "active";
   shell(`
     <section class="ops-hero ${data.automation?.paused ? "paused" : "active"}">
       <div class="ops-hero-copy">
@@ -158,6 +163,12 @@ function dashboard(data: any) {
         ${data.automation?.paused ? `<button class="primary" type="button" id="resume-automation">Automation active</button>` : `<button class="quiet" type="button" id="pause-automation">Pause all releases</button>`}
         <button class="secondary" type="button" id="run-reconciliation">Run reconciliation</button>
       </div>
+    </section>
+    <section class="panel setup-panel">
+      <div class="panel-heading"><div><h2>Setup readiness</h2><p>Complete these steps to start releasing orders consistently.</p></div><strong>${data.onboarding?.percent || 0}%</strong></div>
+      <div class="progress"><span style="width:${data.onboarding?.percent || 0}%"></span></div>
+      ${!planActive ? `<div class="setup-callout"><span>Choose a plan to start releasing orders.</span><button class="secondary" type="button" id="dashboard-plans">View plans</button></div>` : ""}
+      <ul class="checklist">${checklist}</ul>
     </section>
     <div class="grid metrics-grid overview-metrics">
       ${primaryMetric("Releases today", String(data.metrics?.releasesToday || 0), "Completed since midnight")}
@@ -186,11 +197,6 @@ function dashboard(data: any) {
       <div class="panel-heading"><div><h2>Failed releases requiring attention</h2><p>Manual retries create new queue jobs and preserve the original audit trail.</p></div></div>
       ${failedJobs ? `<table><thead><tr><th>Order</th><th>Failure</th><th>Attempts</th><th>Updated</th><th>Actions</th></tr></thead><tbody>${failedJobs}</tbody></table>` : emptyState("No failed releases requiring attention", "Failures that need operator action will appear here.")}
     </section>
-    <section class="panel section-panel">
-      <div class="panel-heading"><div><h2>Setup progress</h2><p>Complete these steps to start releasing orders consistently.</p></div><strong>${data.onboarding?.percent || 0}%</strong></div>
-      <div class="progress"><span style="width:${data.onboarding?.percent || 0}%"></span></div>
-      <ul class="checklist">${checklist}</ul>
-    </section>
     <section class="panel section-panel table-panel">
       <div class="panel-heading"><div><h2>Recent Release Activity</h2><p>Latest 25 audit events across webhooks, queueing, releases, retries, and dry runs.</p></div></div>
       ${rows ? `<table><thead><tr><th>Timestamp</th><th>Order</th><th>Event type</th><th>Status</th><th>Message</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>` : emptyState("No release activity yet", "Activity appears here when Shopify sends order webhooks or when you run a simulator dry run.")}
@@ -214,6 +220,7 @@ function dashboard(data: any) {
     state.message = `Reconciliation complete: ${result.scannedOrders} scanned, ${result.queuedFixes} queued fixes, ${result.ignoredOrders} ignored.`;
     load("dashboard");
   });
+  document.querySelector<HTMLButtonElement>("#dashboard-plans")?.addEventListener("click", () => load("plans"));
   document.querySelectorAll<HTMLButtonElement>("[data-release-retry]").forEach((button) => {
     button.onclick = async () => {
       await api(`releases/${button.dataset.releaseRetry}/retry`, { method: "POST" });
@@ -486,6 +493,7 @@ function plans(data: any) {
         <div>
           <strong>${inactivePlan ? "Choose a plan to activate ShipRelease" : `You're on ${data.currentPlan}`}</strong>
           <span>${inactivePlan ? "Select a Shopify Managed Pricing plan to start releasing orders." : "Manage billing, plan changes, and cancellation in Shopify."}</span>
+          <small>You’ll be redirected to Shopify to confirm or manage your plan.</small>
         </div>
         <a class="button primary" href="${data.manageUrl}" target="_top">${inactivePlan ? "Choose a plan in Shopify" : "Manage plan in Shopify"}</a>
       </div>
@@ -502,10 +510,31 @@ function plans(data: any) {
 
 function support(data: any) {
   const diag = data.diagnostics || {};
+  const supportEmail = "support@sample-guard.com";
+  const shopDomain = diag.shopDomain || "unknown shop";
+  const body = [
+    "Store details:",
+    `Shop domain: ${shopDomain}`,
+    `Plan: ${diag.plan || "unknown"}`,
+    `ShipStation connection: ${diag.shipStationConnectionStatus || "unknown"}`,
+    `Automation enabled: ${diag.automationEnabled}`,
+    `Recent failures: ${diag.recentFailureCount || 0}`,
+    "",
+    "Please add:",
+    "Order number:",
+    "ShipStation reference:",
+    "Screenshot/details:"
+  ].join("\n");
+  const supportHref = mailto(supportEmail, `ShipRelease support request – ${shopDomain}`, body);
+  const featureHref = mailto(supportEmail, `ShipRelease feature request – ${shopDomain}`, body);
   shell(`
-    ${pageIntro("Support", "Share the order number, ShipStation reference, approximate time, and a screenshot when asking for help.")}
+    ${pageIntro("Support", "Get help with a release or share an idea for improving ShipRelease.")}
     <section class="panel support-card">
-      <div class="panel-heading"><div><h2>Merchant support pack</h2><p>Email: <a href="mailto:${data.supportEmail}">${data.supportEmail}</a></p></div>${statusBadge(diag.automationEnabled ? "active" : "inactive")}</div>
+      <div class="panel-heading"><div><h2>How can we help?</h2><p>We include safe store details in the email so support can start with the right context.</p></div>${statusBadge(diag.automationEnabled ? "active" : "inactive")}</div>
+      <div class="support-actions">
+        <a class="button primary" href="${supportHref}">Contact support</a>
+        <a class="button secondary" href="${featureHref}">Request a feature</a>
+      </div>
       <dl class="support-summary">
         <div><dt>Shop domain</dt><dd>${diag.shopDomain}</dd></div>
         <div><dt>Plan</dt><dd>${diag.plan}</dd></div>

@@ -169,13 +169,15 @@ button[type="submit"]:hover,
   color: #ffffff;
 }
 
-button.secondary {
+button.secondary,
+.button.secondary {
   border-color: #95c9b4;
   background: var(--green-soft);
   color: var(--green-deep);
 }
 
-button.quiet {
+button.quiet,
+.button.quiet {
   border-color: #f0c36d;
   background: #fff8ec;
   color: #7a4b00;
@@ -362,6 +364,31 @@ main {
 .overview-summary span {
   color: var(--subdued);
   font-size: 12px;
+}
+
+.setup-panel {
+  padding: 16px;
+  border-color: #d5e8df;
+  background: #ffffff;
+}
+
+.setup-panel > .panel-heading > strong {
+  color: var(--green-deep);
+  font-size: 18px;
+}
+
+.setup-callout {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin: 0 0 14px;
+  padding: 12px;
+  border: 1px solid #b7d9cb;
+  border-radius: 8px;
+  background: var(--green-soft);
+  color: var(--green-deep);
+  font-weight: 700;
 }
 
 .queue-grid {
@@ -574,13 +601,12 @@ tbody tr:hover {
 
 .stacked-form {
   counter-reset: form-section;
-  max-width: 1080px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
+  max-width: 920px;
+  grid-template-columns: 1fr;
 }
 
 .wide-card {
-  grid-column: 1 / -1;
+  grid-column: auto;
 }
 
 label, fieldset {
@@ -716,19 +742,20 @@ textarea {
 .empty-state {
   display: grid;
   justify-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  padding: 24px;
-  border: 1px solid #dfe3e8;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 18px 12px;
+  border: 0;
   border-radius: 8px;
   color: #6d7175;
   text-align: center;
-  background: #fafbfb;
+  background: #fbfcfb;
 }
 
 .empty-state i {
-  width: 34px;
-  height: 34px;
+  display: none;
+  width: 28px;
+  height: 28px;
   border-radius: 999px;
   border: 1px solid rgba(0, 128, 96, 0.22);
   background:
@@ -971,15 +998,24 @@ pre {
   color: var(--subdued);
 }
 
+.plan-cta small {
+  color: var(--subdued);
+}
+
 .support-card a {
   color: var(--green-dark);
   font-weight: 600;
 }
 
 .support-card {
-  background:
-    radial-gradient(circle at right top, rgba(0, 128, 96, 0.1), transparent 16rem),
-    #ffffff;
+  background: #ffffff;
+}
+
+.support-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
 }
 
 dl {
@@ -1058,6 +1094,11 @@ h3 {
   }
 
   .plan-cta {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .setup-callout {
     align-items: stretch;
     flex-direction: column;
   }
