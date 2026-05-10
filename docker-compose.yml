@@ -1,0 +1,67 @@
+services:
+  shiprelease-db:
+    image: postgres:16-alpine
+    container_name: shiprelease-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: shiprelease
+      POSTGRES_USER: shiprelease
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shiprelease-change-me}
+    volumes:
+      - shiprelease-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shiprelease -d shiprelease"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  shiprelease-redis:
+    image: redis:7-alpine
+    container_name: shiprelease-redis
+    restart: unless-stopped
+    volumes:
+      - shiprelease-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  shiprelease-app:
+    build: .
+    container_name: shiprelease-app
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      shiprelease-db:
+        condition: service_healthy
+      shiprelease-redis:
+        condition: service_healthy
+    ports:
+      - "3300:3300"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3300/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    command: sh -c "npx prisma migrate deploy && node dist/server/index.js"
+
+  shiprelease-worker:
+    build: .
+    container_name: shiprelease-worker
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      shiprelease-db:
+        condition: service_healthy
+      shiprelease-redis:
+        condition: service_healthy
+    command: sh -c "npx prisma migrate deploy && node dist/worker/index.js"
+
+volumes:
+  shiprelease-postgres:
+  shiprelease-redis:

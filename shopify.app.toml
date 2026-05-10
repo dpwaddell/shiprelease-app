@@ -1,0 +1,27 @@
+name = "ShipRelease"
+client_id = "a0f0935e00782d09fd7b8d087a5e271a"
+application_url = "https://shiprelease.sample-guard.com"
+embedded = true
+
+[access_scopes]
+scopes = "read_orders"
+
+[auth]
+redirect_urls = [
+  "https://shiprelease.sample-guard.com/auth/callback"
+]
+
+[webhooks]
+api_version = "2026-04"
+
+[[webhooks.subscriptions]]
+topics = ["orders/create", "orders/updated"]
+uri = "/webhooks/orders"
+
+[[webhooks.subscriptions]]
+topics = ["app/uninstalled"]
+uri = "/webhooks/app-uninstalled"
+
+[[webhooks.subscriptions]]
+topics = ["customers/data_request", "customers/redact", "shop/redact"]
+uri = "/webhooks/compliance"

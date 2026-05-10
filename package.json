@@ -1,0 +1,42 @@
+{
+  "name": "shiprelease",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server/index.ts",
+    "worker": "tsx watch src/worker/index.ts",
+    "build": "npm run build:web && tsc -p tsconfig.json",
+    "build:web": "vite build --config src/web/vite.config.ts",
+    "start": "node dist/server/index.js",
+    "start:worker": "node dist/worker/index.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy",
+    "prisma:dev": "prisma migrate dev",
+    "test:webhook": "tsx scripts/test-webhook.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "@shopify/shopify-api": "^11.7.0",
+    "bullmq": "^5.21.2",
+    "compression": "^1.7.5",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "ioredis": "^5.4.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/compression": "^1.7.5",
+    "@types/cookie-parser": "^1.4.8",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  }
+}
