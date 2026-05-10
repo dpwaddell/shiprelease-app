@@ -1,4 +1,5 @@
 import path from "node:path";
+import { legalRouter } from "./routes/legal.js";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import compression from "compression";
@@ -20,6 +21,7 @@ app.use(cookieParser());
 app.get("/health", (_req, res) => res.json({ ok: true, app: "ShipRelease" }));
 app.get("/auth", beginOAuth);
 app.get("/auth/callback", finishOAuth);
+app.use("/", legalRouter);
 app.use("/webhooks", webhookRouter);
 
 app.use("/api", express.json({ limit: "1mb" }), requireShopSession, adminRouter);
