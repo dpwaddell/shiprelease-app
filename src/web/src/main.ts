@@ -46,16 +46,18 @@ function app() {
 
 function shell(content: string) {
   app().innerHTML = `
-    <div class="topbar">
-      <div>
-        <h1>ShipRelease</h1>
-        <p>Automate unpaid order release into ShipStation</p>
+    <div class="app-shell">
+      <div class="topbar">
+        <div>
+          <h1>ShipRelease</h1>
+          <p>Automate unpaid order release into ShipStation</p>
+        </div>
+        <span class="badge">Works with ShipStation</span>
       </div>
-      <span class="badge">Works with ShipStation</span>
+      <nav>${tabs.map((tab) => `<button class="${state.tab === tab.id ? "active" : ""}" data-tab="${tab.id}">${tab.label}</button>`).join("")}</nav>
+      ${state.message ? `<div class="notice">${state.message}</div>` : ""}
+      <main>${content}</main>
     </div>
-    <nav>${tabs.map((tab) => `<button class="${state.tab === tab.id ? "active" : ""}" data-tab="${tab.id}">${tab.label}</button>`).join("")}</nav>
-    ${state.message ? `<div class="notice">${state.message}</div>` : ""}
-    <main>${content}</main>
   `;
   document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((button) => {
     button.onclick = () => load(button.dataset.tab as Tab);
@@ -63,7 +65,7 @@ function shell(content: string) {
 }
 
 function metric(label: string, value: string, sub = "") {
-  return `<section class="metric"><span>${label}</span><strong>${value}</strong>${sub ? `<small>${sub}</small>` : ""}</section>`;
+  return `<section class="metric"><i></i><span>${label}</span><strong>${value}</strong>${sub ? `<small>${sub}</small>` : ""}</section>`;
 }
 
 function statusBadge(status: string) {
@@ -72,7 +74,7 @@ function statusBadge(status: string) {
 }
 
 function emptyState(title: string, detail: string) {
-  return `<div class="empty-state"><strong>${title}</strong><span>${detail}</span></div>`;
+  return `<div class="empty-state"><i></i><strong>${title}</strong><span>${detail}</span></div>`;
 }
 
 function when(value: string | null | undefined) {
@@ -137,13 +139,13 @@ function dashboard(data: any) {
   shell(`
     <section class="ops-hero ${data.automation?.paused ? "paused" : "active"}">
       <div class="ops-hero-copy">
-        <span class="eyebrow">Operations Control Centre</span>
+        <span class="eyebrow"><i></i> Operations Control Centre</span>
         <h2>${data.automation?.paused ? "Automation paused" : "Automation active"}</h2>
-        <p>${data.automation?.paused ? "New releases are stopped. Existing queued work is deferred safely, and audit logging remains active." : "Eligible orders are being monitored, queued, and released into ShipStation."}</p>
+        <p>${data.automation?.paused ? "New releases are stopped. Queued work is deferred safely and audit logging stays active." : "Eligible orders are monitored, queued, and released into ShipStation with operational guardrails."}</p>
       </div>
       <div class="ops-hero-actions">
-        ${data.automation?.paused ? `<button type="button" id="resume-automation">Automation active</button>` : `<button type="button" id="pause-automation">Pause all releases</button>`}
-        <button type="button" id="run-reconciliation">Run reconciliation</button>
+        ${data.automation?.paused ? `<button class="primary" type="button" id="resume-automation">Automation active</button>` : `<button class="quiet" type="button" id="pause-automation">Pause all releases</button>`}
+        <button class="secondary" type="button" id="run-reconciliation">Run reconciliation</button>
       </div>
     </section>
     <div class="status-strip">
@@ -164,7 +166,7 @@ function dashboard(data: any) {
       ${metric("Retries today", String(data.metrics?.retryCountToday || 0))}
       ${metric("Needs attention", String(data.metrics?.failedNeedsAttention || 0))}
     </div>
-    <section class="panel">
+    <section class="panel section-panel">
       <div class="panel-heading"><div><h2>Queue health</h2><p>Current BullMQ and database queue state for release automation.</p></div>${statusBadge((data.metrics?.pendingQueueJobs || 0) > 0 ? "pending" : "success")}</div>
       <div class="queue-grid">
         ${metric("Waiting", String(queue.waiting || 0))}
@@ -173,20 +175,20 @@ function dashboard(data: any) {
         ${metric("Failed in queue", String(queue.failed || 0))}
       </div>
     </section>
-    <section class="panel">
+    <section class="panel section-panel table-panel">
       <div class="panel-heading"><div><h2>Waiting for ShipStation import</h2><p>Orders found by Shopify that have not appeared in ShipStation yet.</p></div></div>
       ${importWaitingJobs ? `<table><thead><tr><th>Order</th><th>Lookups</th><th>Last checked</th><th>Next check</th><th>Timeout</th><th>Actions</th></tr></thead><tbody>${importWaitingJobs}</tbody></table>` : emptyState("No orders waiting for ShipStation import", "Import wait jobs appear here until ShipStation has imported the order or the wait times out.")}
     </section>
-    <section class="panel">
+    <section class="panel section-panel table-panel">
       <div class="panel-heading"><div><h2>Failed releases requiring attention</h2><p>Manual retries create new queue jobs and preserve the original audit trail.</p></div></div>
       ${failedJobs ? `<table><thead><tr><th>Order</th><th>Failure</th><th>Attempts</th><th>Updated</th><th>Actions</th></tr></thead><tbody>${failedJobs}</tbody></table>` : emptyState("No failed releases requiring attention", "Failures that need operator action will appear here.")}
     </section>
-    <section class="panel">
+    <section class="panel section-panel">
       <div class="panel-heading"><div><h2>Setup progress</h2><p>Complete these steps to start releasing orders consistently.</p></div><strong>${data.onboarding?.percent || 0}%</strong></div>
       <div class="progress"><span style="width:${data.onboarding?.percent || 0}%"></span></div>
       <ul class="checklist">${checklist}</ul>
     </section>
-    <section class="panel">
+    <section class="panel section-panel table-panel">
       <div class="panel-heading"><div><h2>Recent Release Activity</h2><p>Latest 25 audit events across webhooks, queueing, releases, retries, and dry runs.</p></div></div>
       ${rows ? `<table><thead><tr><th>Timestamp</th><th>Order</th><th>Event type</th><th>Status</th><th>Message</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>` : emptyState("No release activity yet", "Activity appears here when Shopify sends order webhooks or when you run a simulator dry run.")}
     </section>
@@ -269,13 +271,13 @@ function automation(data: any) {
   shell(`
     ${pageIntro("Automation rules", "Control which orders ShipRelease can release and when operators should be notified.")}
     <form class="form stacked-form" id="automation-form">
-      <section class="panel form-card">
+      <section class="panel form-card numbered-card">
         <div class="panel-heading"><div><h2>Automation status</h2><p>Turn release automation on or keep rules saved while disabled.</p></div>${statusBadge(data.enabled ? "active" : "inactive")}</div>
         <div class="check-grid">
           <label class="check"><input type="checkbox" name="enabled" ${data.enabled ? "checked" : ""}>Automation enabled</label>
         </div>
       </section>
-      <section class="panel form-card">
+      <section class="panel form-card numbered-card">
         <div class="panel-heading"><div><h2>Order eligibility</h2><p>Choose the order states and safeguards that must pass before queueing.</p></div></div>
         <fieldset><legend>Eligible financial statuses</legend><div class="check-grid">${checkboxes("financialStatuses", ["pending", "unpaid", "partially_paid"], data.financialStatuses || [])}</div></fieldset>
         <div class="check-grid">
@@ -285,13 +287,13 @@ function automation(data: any) {
         </div>
         <label>Manual review amount${fieldHelp("Orders above this total stay blocked when manual review is enabled.")}<input name="manualReviewAmount" value="${data.manualReviewAmount || 0}" type="number" min="0" step="0.01"></label>
       </section>
-      <section class="panel form-card">
+      <section class="panel form-card numbered-card wide-card">
         <div class="panel-heading"><div><h2>Payment methods and tags</h2><p>Match the gateway text and tags your Shopify operations team already uses.</p></div></div>
         <label>Payment methods or gateway text${fieldHelp("One per line. Example: Manual Payment, Bank Deposit, Net Terms.")}<textarea name="paymentMethods" placeholder="Manual Payment&#10;Bank Deposit&#10;Net Terms">${textareaLines(data.paymentMethods)}</textarea></label>
         <label>Include tags${fieldHelp("Optional. If set, an order must include at least one of these tags.")}<textarea name="includeTags" placeholder="wholesale&#10;approved-account">${textareaLines(data.includeTags)}</textarea></label>
         <label>Exclude tags${fieldHelp("One per line. Matching orders are ignored by automation.")}<textarea name="excludeTags" placeholder="fraud&#10;review&#10;sampleguard:hold">${textareaLines(data.excludeTags)}</textarea></label>
       </section>
-      <section class="panel form-card">
+      <section class="panel form-card numbered-card">
         <div class="panel-heading"><div><h2>Release timing</h2><p>Use delays when ShipStation or internal review workflows need a short buffer.</p></div></div>
         <div class="form-grid">
           <label>Rule engine delay minutes${fieldHelp("Additional delay before processing a matching order.")}<input name="delayMinutes" value="${data.delayMinutes || data.releaseDelayMinutes || 0}" type="number" min="0" max="1440"></label>
@@ -300,7 +302,7 @@ function automation(data: any) {
           </select></label>
         </div>
       </section>
-      <section class="panel form-card">
+      <section class="panel form-card numbered-card">
         <div class="panel-heading"><div><h2>Notifications</h2><p>Send operational alerts without spamming repeated incidents.</p></div></div>
         <label>Notification email<input name="notificationEmail" value="${data.notificationEmail || ""}" type="email" placeholder="ops@example.com"></label>
         <fieldset><legend>Notify for</legend><div class="check-grid">
@@ -314,7 +316,7 @@ function automation(data: any) {
           <label>Notification debounce minutes<input name="notificationDebounceMinutes" value="${data.notificationDebounceMinutes || 60}" type="number" min="5" max="1440"></label>
         </div>
       </section>
-      <div class="sticky-actions"><button type="submit">Save settings</button></div>
+      <div class="sticky-actions"><button class="primary" type="submit">Save settings</button></div>
     </form>
   `);
   document.querySelector<HTMLFormElement>("#automation-form")!.onsubmit = async (event) => {
@@ -350,22 +352,28 @@ function automation(data: any) {
 }
 
 function simulator(data: any = {}) {
+  const preview = data.result?.shipStationPayloadPreview || { blocked: true };
+  const previewRows = Object.entries(preview).map(([key, value]) => `
+    <div><dt>${key.replaceAll("_", " ")}</dt><dd>${Array.isArray(value) ? value.join(", ") : String(value)}</dd></div>
+  `).join("");
   const result = data.result ? `
     <section class="panel simulator-result result-card">
       <div class="panel-heading"><div><h2>Dry run result</h2><p>No ShipStation release call was made.</p></div>${statusBadge(data.result.decision === "would_release" ? "success" : "info")}</div>
-      <dl>
-        <dt>Webhook detected</dt><dd>${data.result.webhookDetected}</dd>
-        <dt>Queue job created</dt><dd>${data.result.queueJobCreated}</dd>
-        <dt>Decision</dt><dd>${data.result.decision.replace("_", " ")}</dd>
-        <dt>Rule result</dt><dd>${data.result.ruleEvaluation.eligible && data.result.ruleEvaluation.foundation.passed ? "Passed" : data.result.ruleEvaluation.reason || "Blocked by rule foundation"}</dd>
+      <dl class="result-grid">
+        <div><dt>Webhook detected</dt><dd>${data.result.webhookDetected}</dd></div>
+        <div><dt>Queue job created</dt><dd>${data.result.queueJobCreated}</dd></div>
+        <div><dt>Decision</dt><dd>${data.result.decision.replace("_", " ")}</dd></div>
+        <div><dt>Rule result</dt><dd>${data.result.ruleEvaluation.eligible && data.result.ruleEvaluation.foundation.passed ? "Passed" : data.result.ruleEvaluation.reason || "Blocked by rule foundation"}</dd></div>
       </dl>
-      <pre>${JSON.stringify(data.result.shipStationPayloadPreview || { blocked: true }, null, 2)}</pre>
+      <h3>ShipStation preview</h3>
+      <dl class="preview-grid">${previewRows}</dl>
     </section>
   ` : "";
   shell(`
     ${pageIntro("Release simulator", "Test an order against the current rule set without queueing a job or calling ShipStation.")}
     <section class="panel form-card">
-      <div class="panel-heading"><div><h2>Dry run inputs</h2><p>Use a recent order shape or a hypothetical manual-payment order.</p></div>${statusBadge("info")}</div>
+      <div class="panel-heading"><div><h2>Dry run inputs</h2><p>Use a recent order shape or a hypothetical manual-payment order.</p></div>${statusBadge("dry run")}</div>
+      <div class="reassurance"><i></i><span>No real release will be made and ShipStation will not be called.</span></div>
       <form class="form" id="simulator-form">
         <div class="form-grid">
           <label>Order number or ID<input name="orderId" required placeholder="#1001"></label>
@@ -376,7 +384,7 @@ function simulator(data: any = {}) {
           <label>Total price<input name="totalPrice" value="0" type="number" min="0" step="0.01"></label>
           <label>Risk level<select name="riskLevel"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
         </div>
-        <div class="actions"><button type="submit">Run dry run</button></div>
+        <div class="actions"><button class="primary" type="submit">Run dry run</button></div>
       </form>
     </section>
     ${result}
@@ -415,17 +423,19 @@ function shipstation(data: any) {
   `;
   shell(`
     ${pageIntro("ShipStation connection", "Connect the ShipStation account that receives imported Shopify orders. Secrets are encrypted and never shown again.")}
-    <section class="panel connection-card">
+    <section class="panel connection-card ${data.connectionStatus === "connected" ? "connected" : "attention"}">
+      <div class="integration-mark"><i></i><span>ShipStation</span></div>
       <div class="panel-heading"><div><h2>Connection status</h2><p>Last success: ${data.lastSuccessAt ? new Date(data.lastSuccessAt).toLocaleString() : "No successful test recorded"}</p></div>${statusBadge(data.connectionStatus)}</div>
       ${data.lastFailureReason ? `<div class="inline-warning">${data.lastFailureReason}</div>` : ""}
       ${savedCredentials}
     </section>
     <section class="panel form-card">
       <div class="panel-heading"><div><h2>${data.configured ? "Replace credentials" : "Save credentials"}</h2><p>${data.configured ? "Enter both fields to replace the stored ShipStation credentials. Existing secrets are not displayed." : "Add API credentials from ShipStation to enable release automation."}</p></div></div>
+      <div class="reassurance"><i></i><span>Credentials are stored encrypted. The API secret is never returned to this page.</span></div>
       <form class="form" id="shipstation-form">
         <label>API key<input name="apiKey" autocomplete="off" placeholder="${data.configured ? "Enter a new API key to replace saved credentials" : ""}" required></label>
         <label>API secret<input name="apiSecret" type="password" autocomplete="new-password" placeholder="${data.configured ? "Enter a new API secret to replace saved credentials" : ""}" required></label>
-        <div class="actions"><button type="submit">${data.configured ? "Replace credentials" : "Save credentials"}</button><button type="button" id="test-connection">Test connection</button></div>
+        <div class="actions"><button class="primary" type="submit">${data.configured ? "Replace credentials" : "Save credentials"}</button><button class="secondary" type="button" id="test-connection">Test connection</button></div>
       </form>
     </section>
   `);
@@ -447,6 +457,7 @@ function plans(data: any) {
   const planRows = Object.entries(data.plans || {}).map(([name, limit]) => `
     <section class="plan-card ${String(data.currentPlan || "").toLowerCase() === String(name).toLowerCase() ? "current" : ""}">
       <span>${name}</span>
+      ${String(data.currentPlan || "").toLowerCase() === String(name).toLowerCase() ? `<em>Current plan</em>` : ""}
       <strong>${Number(limit) === 0 ? "Custom" : Number(limit).toLocaleString()}</strong>
       <small>${Number(limit) === 0 ? "Contact support" : "releases/month"}</small>
     </section>
@@ -464,7 +475,7 @@ function plans(data: any) {
       <div class="panel-heading"><div><h2>Current plan</h2><p>Usage this month: ${data.usage?.count || 0} / ${data.allowance || 0}</p></div>${statusBadge(data.planStatus || "inactive")}</div>
       ${planNotice}
       <div class="plan-grid">${planRows}</div>
-      <div class="actions"><button type="button" id="refresh-plan">Refresh plan status</button><a class="button" href="${data.manageUrl}" target="_top">Manage plan in Shopify</a></div>
+      <div class="actions"><button class="secondary" type="button" id="refresh-plan">Refresh plan status</button><a class="button primary" href="${data.manageUrl}" target="_top">Manage plan in Shopify</a></div>
     </section>
   `);
   document.querySelector<HTMLButtonElement>("#refresh-plan")!.onclick = async () => {
@@ -480,12 +491,12 @@ function support(data: any) {
     ${pageIntro("Support", "Share the order number, ShipStation reference, approximate time, and a screenshot when asking for help.")}
     <section class="panel support-card">
       <div class="panel-heading"><div><h2>Merchant support pack</h2><p>Email: <a href="mailto:${data.supportEmail}">${data.supportEmail}</a></p></div>${statusBadge(diag.automationEnabled ? "active" : "inactive")}</div>
-      <dl>
-        <dt>Shop domain</dt><dd>${diag.shopDomain}</dd>
-        <dt>Plan</dt><dd>${diag.plan}</dd>
-        <dt>ShipStation</dt><dd>${diag.shipStationConnectionStatus}</dd>
-        <dt>Automation enabled</dt><dd>${diag.automationEnabled}</dd>
-        <dt>Recent failures</dt><dd>${diag.recentFailureCount}</dd>
+      <dl class="support-summary">
+        <div><dt>Shop domain</dt><dd>${diag.shopDomain}</dd></div>
+        <div><dt>Plan</dt><dd>${diag.plan}</dd></div>
+        <div><dt>ShipStation</dt><dd>${diag.shipStationConnectionStatus}</dd></div>
+        <div><dt>Automation enabled</dt><dd>${diag.automationEnabled}</dd></div>
+        <div><dt>Recent failures</dt><dd>${diag.recentFailureCount}</dd></div>
       </dl>
     </section>
   `);
