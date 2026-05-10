@@ -160,7 +160,9 @@ export type RecentShopifyOrder = {
 };
 
 function numericShopifyId(gid: string) {
-  return gid.split("/").pop() || gid;
+  const value = String(gid || "").trim();
+  const numeric = value.split("/").filter(Boolean).pop();
+  return numeric || value;
 }
 
 function shopifySearchValue(value: string) {
@@ -222,9 +224,11 @@ function orderNodeToRecentOrder(node: {
   totalPriceSet?: { shopMoney?: { amount?: string | null } | null } | null;
   transactions?: Array<{ gateway?: string | null }>;
 }) {
+  const id = numericShopifyId(node.id);
+  if (!id) throw new Error(`Shopify order ${node.name || "unknown"} is missing an ID`);
   const gateways = (node.transactions || []).map((transaction) => transaction.gateway || "").filter(Boolean);
   return {
-    id: numericShopifyId(node.id),
+    id,
     name: node.name,
     financial_status: String(node.displayFinancialStatus || "").toLowerCase(),
     gateway: gateways.join(", "),

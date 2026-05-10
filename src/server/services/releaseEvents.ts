@@ -42,6 +42,23 @@ function sanitizeMetadata(value: unknown): Prisma.InputJsonValue | undefined {
   return String(value);
 }
 
+function safeOrderId(orderId: string) {
+  const value = String(orderId || "").trim();
+  if (!value) throw new Error("Release event orderId is required");
+  return value;
+}
+
+function eventIdempotencyKey(input: {
+  shopId: string;
+  orderId: string;
+  eventType: ReleaseEventType;
+  status: ReleaseEventStatus;
+  metadata?: Record<string, unknown>;
+}) {
+  const releaseJobId = typeof input.metadata?.releaseJobId === "string" ? input.metadata.releaseJobId : "no-job";
+  return `${input.shopId}:${input.orderId}:${input.eventType}:${input.status}:${releaseJobId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+}
+
 export async function logReleaseEvent(input: {
   shopId: string;
   orderId: string;
@@ -51,15 +68,19 @@ export async function logReleaseEvent(input: {
   message: string;
   metadata?: Record<string, unknown>;
 }) {
+  const orderId = safeOrderId(input.orderId);
   return prisma.releaseEvent.create({
     data: {
       shopId: input.shopId,
-      orderId: input.orderId,
+      orderId,
       orderName: input.orderName || null,
       eventType: input.eventType,
       status: input.status,
       message: input.message,
-      metadata: sanitizeMetadata(input.metadata)
+      metadata: sanitizeMetadata(input.metadata),
+      legacyShopifyOrderId: orderId,
+      legacyShopifyOrderName: input.orderName || null,
+      legacyIdempotencyKey: eventIdempotencyKey({ ...input, orderId })
     }
   });
 }

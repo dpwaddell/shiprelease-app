@@ -20,6 +20,51 @@ const ACTIVE_JOB_STATUSES = ["queued", "retrying", "waiting_for_shipstation_impo
 const DEMO_SUCCESS_MESSAGE = "Demo release completed — no live ShipStation action was performed.";
 type ReleaseSource = "webhook" | "reconciliation" | "manual_retry" | "demo_sync";
 
+function requiredOrderId(value: string | number | null | undefined) {
+  return String(value || "").trim();
+}
+
+async function ensureDemoReleaseEvents(input: {
+  shopId: string;
+  orderId: string;
+  orderName?: string | null;
+  releaseJobId: string;
+  source: ReleaseSource;
+  demoTag: string;
+}) {
+  const existingSuccess = await prisma.releaseEvent.findFirst({
+    where: {
+      shopId: input.shopId,
+      orderId: input.orderId,
+      eventType: "release_success",
+      status: "success",
+      message: DEMO_SUCCESS_MESSAGE
+    },
+    select: { id: true }
+  });
+  if (existingSuccess) return false;
+
+  await logReleaseEvent({
+    shopId: input.shopId,
+    orderId: input.orderId,
+    orderName: input.orderName,
+    eventType: "demo_release_candidate",
+    status: "info",
+    message: `Demo mode tag ${input.demoTag} matched. ShipStation will not be called.`,
+    metadata: { releaseJobId: input.releaseJobId, source: input.source, demoMode: true, demoTag: input.demoTag }
+  });
+  await logReleaseEvent({
+    shopId: input.shopId,
+    orderId: input.orderId,
+    orderName: input.orderName,
+    eventType: "release_success",
+    status: "success",
+    message: DEMO_SUCCESS_MESSAGE,
+    metadata: { releaseJobId: input.releaseJobId, source: input.source, demoMode: true, demoTag: input.demoTag, simulated: true }
+  });
+  return true;
+}
+
 export async function hasActiveReleaseJob(shopId: string, orderId: string) {
   return prisma.releaseJob.findFirst({
     where: {
@@ -42,7 +87,7 @@ export async function queueReleaseFromOrder(input: {
   source: ReleaseSource;
   retryOfJobId?: string;
 }) {
-  const orderId = String(input.order.id);
+  const orderId = requiredOrderId(input.order.id);
   const orderName = input.order.name || orderId;
   const gateway = orderGateway(input.order);
   const eligibility = evaluateOrderEligibility(input.order, input.settings);
@@ -91,15 +136,34 @@ export async function queueReleaseFromOrder(input: {
   }
 
   if (demoCandidate) {
+    if (!orderId) {
+      await prisma.appEvent.create({
+        data: {
+          shopId: input.shopId,
+          eventType: "demo_release_missing_order_id",
+          message: "Demo release skipped because Shopify order ID was missing",
+          metadata: { source: input.source, demoMode: true, demoTag: demo.tag, orderName }
+        }
+      });
+      return { queued: false, ignored: true, simulated: false, processed: false, reason: "Demo release skipped because order ID was missing" };
+    }
     const idempotencyKey = `${input.shopId}:${orderId}:demo-release:${demo.tag.toLowerCase()}`;
     const existingDemoRelease = await prisma.releaseJob.findUnique({ where: { idempotencyKey } });
     if (existingDemoRelease?.status === "demo_completed") {
+      const eventsCreated = await ensureDemoReleaseEvents({
+        shopId: input.shopId,
+        orderId: existingDemoRelease.shopifyOrderId || orderId,
+        orderName: existingDemoRelease.shopifyOrderName || orderName,
+        releaseJobId: existingDemoRelease.id,
+        source: input.source,
+        demoTag: demo.tag
+      });
       return {
         queued: false,
         ignored: false,
         simulated: true,
-        processed: false,
-        reason: "Demo release already completed",
+        processed: eventsCreated,
+        reason: eventsCreated ? "Demo release audit events restored" : "Demo release already completed",
         releaseJob: existingDemoRelease
       };
     }
@@ -136,23 +200,13 @@ export async function queueReleaseFromOrder(input: {
         releasedAt: new Date()
       }
     });
-    await logReleaseEvent({
+    await ensureDemoReleaseEvents({
       shopId: input.shopId,
       orderId,
       orderName,
-      eventType: "demo_release_candidate",
-      status: "info",
-      message: `Demo mode tag ${demo.tag} matched. ShipStation will not be called.`,
-      metadata: { releaseJobId: releaseJob.id, source: input.source, demoMode: true, demoTag: demo.tag }
-    });
-    await logReleaseEvent({
-      shopId: input.shopId,
-      orderId,
-      orderName,
-      eventType: "release_success",
-      status: "success",
-      message: DEMO_SUCCESS_MESSAGE,
-      metadata: { releaseJobId: releaseJob.id, source: input.source, demoMode: true, demoTag: demo.tag, simulated: true }
+      releaseJobId: releaseJob.id,
+      source: input.source,
+      demoTag: demo.tag
     });
     logDemoDecision("DEMO_RELEASE_COMPLETED", { shopId: input.shopId, orderId, orderName, releaseJobId: releaseJob.id, source: input.source });
     return { queued: false, ignored: false, simulated: true, processed: true, reason: "Demo release completed", releaseJob };
