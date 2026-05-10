@@ -78,12 +78,13 @@ async function processRelease(job: { data: ReleaseJob; attemptsMade: number }) {
     eventType: "release_started",
     status: "pending",
     message: "Release worker started ShipStation release.",
-    metadata: { attempt: job.attemptsMade + 1 }
+    metadata: { releaseJobId: releaseJob.id, attempt: job.attemptsMade + 1 }
   });
 
   const credentials = releaseJob.shop.shipstationCredentials;
   if (!credentials) throw new Error("ShipStation credentials are missing");
   if (!releaseJob.shop.automationSettings?.enabled) throw new Error("Automation is disabled");
+  if (releaseJob.shop.automationSettings.automationPaused) throw new Error("Automation is paused");
 
   const auth = {
     apiKey: decryptSecret(credentials.encryptedApiKey),
@@ -92,6 +93,10 @@ async function processRelease(job: { data: ReleaseJob; attemptsMade: number }) {
   const candidates = orderCandidates({
     id: releaseJob.shopifyOrderId,
     name: releaseJob.shopifyOrderName
+  });
+  await prisma.releaseJob.update({
+    where: { id: releaseJob.id },
+    data: { lookupCandidates: candidates }
   });
   const shipstationOrder = await locateShipStationOrder(auth, candidates);
   if (!shipstationOrder) throw new Error(`No matching ShipStation order found for ${candidates.join(", ")}`);
@@ -129,7 +134,7 @@ async function processRelease(job: { data: ReleaseJob; attemptsMade: number }) {
     eventType: "release_success",
     status: "success",
     message: `Released ${releaseJob.shopifyOrderName || releaseJob.shopifyOrderId} into ShipStation workflow.`,
-    metadata: { shipstationOrderId: shipstationOrder.orderId }
+    metadata: { releaseJobId: releaseJob.id, shipstationOrderId: shipstationOrder.orderId }
   });
   await maybeSendUsageWarnings(releaseJob.shopId);
 }
@@ -163,24 +168,66 @@ worker.on("failed", async (job, error) => {
       eventType: willRetry ? "retry_scheduled" : "release_failed",
       status: willRetry ? "pending" : "failed",
       message: willRetry ? "Release failed and will retry." : error.message,
-      metadata: { attemptsMade: job.attemptsMade }
+      metadata: { releaseJobId: releaseJob.id, attemptsMade: job.attemptsMade }
     });
   }
   if (releaseJob && !willRetry) {
+    const failuresToday = await prisma.releaseJob.count({
+      where: {
+        shopId: releaseJob.shopId,
+        status: "failed",
+        updatedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+      }
+    });
     await sendNotification({
       shopId: releaseJob.shopId,
       to: releaseJob.shop.automationSettings?.notificationEmail,
       eventType: "release_failed",
       subject: "ShipRelease order release failed",
-      text: `ShipRelease could not release ${releaseJob.shopifyOrderName || releaseJob.shopifyOrderId} for ${releaseJob.shop.domain}.\n\n${error.message}`
+      text: `ShipRelease could not release ${releaseJob.shopifyOrderName || releaseJob.shopifyOrderId} for ${releaseJob.shop.domain}.\n\n${error.message}`,
+      debounceMinutes: releaseJob.shop.automationSettings?.notificationDebounceMinutes
     });
+    if (
+      releaseJob.shop.automationSettings?.notifyRepeatedFailures &&
+      failuresToday >= releaseJob.shop.automationSettings.repeatedFailureThreshold
+    ) {
+      await sendNotification({
+        shopId: releaseJob.shopId,
+        to: releaseJob.shop.automationSettings.notificationEmail,
+        eventType: "repeated_release_failures",
+        subject: "ShipRelease repeated release failures detected",
+        text: `${releaseJob.shop.domain} has ${failuresToday} failed release jobs in the last 24 hours.`,
+        debounceMinutes: releaseJob.shop.automationSettings.notificationDebounceMinutes
+      });
+    }
   }
 });
 
 worker.on("ready", () => console.log("ShipRelease worker ready"));
 worker.on("error", (error) => console.error("ShipRelease worker error", error));
 
+async function cleanupOldAuditEvents() {
+  const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+  const [releaseEvents, appEvents] = await prisma.$transaction([
+    prisma.releaseEvent.deleteMany({ where: { createdAt: { lt: cutoff } } }),
+    prisma.appEvent.deleteMany({ where: { createdAt: { lt: cutoff } } })
+  ]);
+  await prisma.appEvent.create({
+    data: {
+      eventType: "audit_retention_cleanup",
+      message: `Deleted ${releaseEvents.count + appEvents.count} audit events older than 90 days`,
+      metadata: { cutoff: cutoff.toISOString(), releaseEventsDeleted: releaseEvents.count, appEventsDeleted: appEvents.count }
+    }
+  });
+}
+
+cleanupOldAuditEvents().catch((error) => console.error("Audit retention cleanup failed", error));
+const cleanupTimer = setInterval(() => {
+  cleanupOldAuditEvents().catch((error) => console.error("Audit retention cleanup failed", error));
+}, 24 * 60 * 60 * 1000);
+
 async function shutdown() {
+  clearInterval(cleanupTimer);
   await worker.close();
   await redisConnection?.quit();
   await prisma.$disconnect();

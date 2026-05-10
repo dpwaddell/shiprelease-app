@@ -2,9 +2,10 @@ import express from "express";
 import { prisma } from "../db.js";
 import { verifyShopifyWebhook } from "../utils/hmac.js";
 import { normalizeShopDomain } from "../utils/shop.js";
-import { evaluateOrderEligibility, orderGateway } from "../services/eligibility.js";
-import { enqueueRelease } from "../queue/releaseQueue.js";
+import { orderGateway } from "../services/eligibility.js";
 import { logReleaseEvent } from "../services/releaseEvents.js";
+import { queueReleaseFromOrder } from "../services/releaseOrchestration.js";
+import { sendNotification } from "../services/notifications.js";
 
 export const webhookRouter = express.Router();
 
@@ -22,11 +23,9 @@ webhookRouter.post("/orders", async (req, res) => {
     if (!shop || shop.uninstalledAt) return;
     const settings = await prisma.automationSetting.upsert({
       where: { shopId: shop.id },
-      update: {},
-      create: { shopId: shop.id }
+      update: { lastWebhookReceivedAt: new Date() },
+      create: { shopId: shop.id, lastWebhookReceivedAt: new Date() }
     });
-    const idempotencyKey = `${shop.id}:${order.id}:release-to-awaiting-shipment`;
-    const result = evaluateOrderEligibility(order, settings);
     await logReleaseEvent({
       shopId: shop.id,
       orderId: String(order.id),
@@ -47,63 +46,28 @@ webhookRouter.post("/orders", async (req, res) => {
         metadata: { financialStatus: order.financial_status }
       });
     }
-    const existing = await prisma.releaseJob.findUnique({ where: { idempotencyKey } });
-    if (existing && existing.status !== "skipped") {
-      await logReleaseEvent({
-        shopId: shop.id,
-        orderId: String(order.id),
-        orderName: order.name,
-        eventType: "ignored",
-        status: "info",
-        message: "Order already has an active release job.",
-        metadata: { releaseJobId: existing.id, status: existing.status }
-      });
-      return;
-    }
-
-    const releaseJob = await prisma.releaseJob.upsert({
-      where: { idempotencyKey },
-      update: result.eligible ? {
-        status: "queued",
-        skipReason: null,
-        failureReason: null,
-        queuedAt: new Date()
-      } : {
-        status: "skipped",
-        skipReason: result.reason,
-        failureReason: null
-      },
-      create: {
-        shopId: shop.id,
-        shopifyOrderId: String(order.id),
-        shopifyOrderName: order.name,
-        shopifyFinancialStatus: order.financial_status,
-        shopifyGateway: orderGateway(order),
-        idempotencyKey,
-        status: result.eligible ? "queued" : "skipped",
-        skipReason: result.reason
-      }
-    });
-
-    await logReleaseEvent({
-      shopId: shop.id,
-      orderId: String(order.id),
-      orderName: order.name,
-      eventType: result.eligible ? "queued_for_release" : "ignored",
-      status: result.eligible ? "pending" : "info",
-      message: result.eligible ? "Order queued for ShipStation release." : result.reason || "Order ignored by automation rules.",
-      metadata: { releaseJobId: releaseJob.id, delayMinutes: settings.releaseDelayMinutes }
-    });
-
-    if (result.eligible) await enqueueRelease({ releaseJobId: releaseJob.id, shopId: shop.id }, settings.releaseDelayMinutes);
+    await queueReleaseFromOrder({ shopId: shop.id, order, settings, source: "webhook" });
   } catch (error) {
+    const shopDomain = req.get("x-shopify-shop-domain");
+    const shop = shopDomain ? await prisma.shop.findUnique({ where: { domain: normalizeShopDomain(shopDomain) }, include: { automationSettings: true } }).catch(() => null) : null;
     await prisma.appEvent.create({
       data: {
+        shopId: shop?.id,
         eventType: "webhook_processing_failed",
         message: error instanceof Error ? error.message : "Webhook processing failed",
         metadata: { topic: req.get("x-shopify-topic"), shop: req.get("x-shopify-shop-domain") }
       }
     });
+    if (shop?.automationSettings?.notifyWebhookFailures) {
+      await sendNotification({
+        shopId: shop.id,
+        to: shop.automationSettings.notificationEmail,
+        eventType: "webhook_processing_failed_alert",
+        subject: "ShipRelease webhook processing failed",
+        text: `ShipRelease could not process a Shopify webhook for ${shop.domain}. Reconciliation can be run from the dashboard.`,
+        debounceMinutes: shop.automationSettings.notificationDebounceMinutes
+      });
+    }
   }
 });
 

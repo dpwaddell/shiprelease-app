@@ -9,7 +9,9 @@ export const RELEASE_EVENT_TYPES = [
   "release_success",
   "release_failed",
   "manual_release",
+  "manual_retry",
   "retry_scheduled",
+  "rule_evaluated",
   "ignored"
 ] as const;
 

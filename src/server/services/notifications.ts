@@ -7,9 +7,22 @@ type Notice = {
   subject: string;
   text: string;
   eventType: string;
+  debounceMinutes?: number;
 };
 
 export async function sendNotification(notice: Notice) {
+  if (notice.debounceMinutes && notice.shopId) {
+    const recent = await prisma.appEvent.findFirst({
+      where: {
+        shopId: notice.shopId,
+        eventType: notice.eventType,
+        createdAt: { gte: new Date(Date.now() - notice.debounceMinutes * 60_000) }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+    if (recent) return;
+  }
+
   await prisma.appEvent.create({
     data: {
       shopId: notice.shopId,

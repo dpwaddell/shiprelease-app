@@ -131,6 +131,54 @@ main {
   padding: 16px;
 }
 
+.ops-banner {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid #dfe3e8;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.ops-banner div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.ops-banner span {
+  color: #6d7175;
+}
+
+.ops-banner.paused {
+  border-color: #f0c36d;
+  background: #fff8ec;
+}
+
+.queue-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.queue-grid .metric {
+  padding: 12px;
+}
+
+.row-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.row-actions button {
+  min-height: 30px;
+  padding: 5px 9px;
+}
+
 .metric {
   display: grid;
   gap: 8px;
@@ -294,6 +342,11 @@ textarea {
   color: #8a6116;
 }
 
+.status.active {
+  background: #f1f8f5;
+  color: #007f5f;
+}
+
 .error {
   color: #d72c0d;
 }
@@ -348,13 +401,39 @@ dl {
   margin: 16px 0 0;
 }
 
+h3 {
+  margin: 18px 0 0;
+  font-size: 14px;
+}
+
+.detail-panel {
+  border-color: #babfc3;
+}
+
+.timeline {
+  display: grid;
+  gap: 12px;
+  padding-left: 20px;
+}
+
+.timeline li {
+  padding-left: 4px;
+}
+
+.timeline time,
+.timeline span {
+  display: block;
+  margin-top: 3px;
+  color: #6d7175;
+}
+
 @media (max-width: 700px) {
   .topbar, nav {
     padding-left: 16px;
     padding-right: 16px;
   }
 
-  .topbar, nav {
+  .topbar, nav, .ops-banner {
     flex-wrap: wrap;
   }
 

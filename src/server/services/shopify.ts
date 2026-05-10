@@ -148,3 +148,64 @@ export async function syncManagedPricing(shopId: string) {
     }
   });
 }
+
+export type RecentShopifyOrder = {
+  id: string;
+  name: string;
+  financial_status: string;
+  gateway: string;
+  payment_gateway_names: string[];
+  tags: string;
+  total_price: string;
+};
+
+function numericShopifyId(gid: string) {
+  return gid.split("/").pop() || gid;
+}
+
+export async function fetchRecentUpdatedOrders(shopId: string, since: Date): Promise<RecentShopifyOrder[]> {
+  const data = await shopifyGraphql<{
+    data?: {
+      orders?: {
+        edges: Array<{
+          node: {
+            id: string;
+            name: string;
+            displayFinancialStatus?: string | null;
+            tags: string[];
+            totalPriceSet?: { shopMoney?: { amount?: string | null } | null } | null;
+            transactions?: Array<{ gateway?: string | null }>;
+          };
+        }>;
+      };
+    };
+  }>(shopId, `
+    query RecentOrders($query: String!) {
+      orders(first: 100, sortKey: UPDATED_AT, reverse: true, query: $query) {
+        edges {
+          node {
+            id
+            name
+            displayFinancialStatus
+            tags
+            totalPriceSet { shopMoney { amount } }
+            transactions(first: 5) { gateway }
+          }
+        }
+      }
+    }
+  `, { query: `updated_at:>=${since.toISOString()}` });
+
+  return (data.data?.orders?.edges || []).map(({ node }) => {
+    const gateways = (node.transactions || []).map((transaction) => transaction.gateway || "").filter(Boolean);
+    return {
+      id: numericShopifyId(node.id),
+      name: node.name,
+      financial_status: String(node.displayFinancialStatus || "").toLowerCase(),
+      gateway: gateways.join(", "),
+      payment_gateway_names: gateways,
+      tags: node.tags.join(", "),
+      total_price: node.totalPriceSet?.shopMoney?.amount || "0"
+    };
+  });
+}
