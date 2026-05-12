@@ -582,8 +582,9 @@ function plans(data: any) {
       <div class="plan-cta">
         <div>
           <strong>${inactivePlan ? "Choose a plan to activate ShipRelease" : `You’re on ${data.currentPlan}`}</strong>
-          <span>Plans are managed by Shopify Managed Pricing. To choose or manage a plan, open ShipRelease from its Shopify App Store listing or your installed apps billing area.</span>
+          <span>Plans are managed by Shopify Managed Pricing. Select or manage your plan on Shopify’s hosted plan page.</span>
         </div>
+        ${data.managedPricingUrl ? `<a class="button primary" href="${data.managedPricingUrl}" target="_top" rel="noopener noreferrer">Choose or manage plan</a>` : ""}
       </div>
       <div class="plan-reviewer-note">
         <strong>App reviewer note:</strong> Plans are managed by Shopify. If you are reviewing the app and cannot select a plan, you can still test all core features.

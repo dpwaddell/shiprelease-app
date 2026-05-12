@@ -180,6 +180,14 @@ Cleanup does not delete `release_jobs`. Release job history is kept permanently 
 
 ShipRelease uses Shopify Managed Pricing data from `currentAppInstallation.activeSubscriptions`.
 
+Managed Pricing plan selection is handled by Shopify's hosted plan page at:
+
+```
+https://admin.shopify.com/store/<store_handle>/charges/<app_handle>/pricing_plans
+```
+
+This `/charges/` URL is the standard Shopify Managed Pricing plan selector. It is not Billing API charge creation and does not use `appSubscriptionCreate`, `confirmationUrl`, or `recurring_application_charge`. The Plans page surfaces a direct link to this URL so merchants can choose or change their plan without leaving the Shopify admin environment.
+
 Plan limits:
 
 - Starter: 100 releases/month

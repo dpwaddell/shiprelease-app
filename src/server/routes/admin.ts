@@ -95,12 +95,16 @@ function shipStationCredentialSummary(credentials: {
 async function planStatus(shopId: string) {
   const shop = await prisma.shop.findUniqueOrThrow({ where: { id: shopId } });
   const usage = await getPlanUsage(shop.id, shop.planName);
+  const storeHandle = shop.domain.replace(/\.myshopify\.com$/, "");
+  const appHandle = env.SHOPIFY_APP_HANDLE || "shiprelease";
+  const managedPricingUrl = `https://admin.shopify.com/store/${storeHandle}/charges/${appHandle}/pricing_plans`;
   return {
     currentPlan: shop.planName,
     planStatus: shop.planStatus,
     allowance: planLimit(shop.planName),
     usage: { month: usage.month, count: usage.count, limit: usage.limit },
-    plans: PLAN_LIMITS
+    plans: PLAN_LIMITS,
+    managedPricingUrl
   };
 }
 
