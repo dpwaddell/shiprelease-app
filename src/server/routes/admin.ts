@@ -92,21 +92,15 @@ function shipStationCredentialSummary(credentials: {
   };
 }
 
-function shopAdminHandle(domain: string) {
-  return domain.replace(/\.myshopify\.com$/i, "");
-}
-
 async function planStatus(shopId: string) {
   const shop = await prisma.shop.findUniqueOrThrow({ where: { id: shopId } });
   const usage = await getPlanUsage(shop.id, shop.planName);
-  const appHandle = env.SHOPIFY_APP_HANDLE || "shiprelease";
   return {
     currentPlan: shop.planName,
     planStatus: shop.planStatus,
     allowance: planLimit(shop.planName),
     usage: { month: usage.month, count: usage.count, limit: usage.limit },
-    plans: PLAN_LIMITS,
-    manageUrl: `https://admin.shopify.com/store/${shopAdminHandle(shop.domain)}/charges/${encodeURIComponent(appHandle)}/pricing_plans`
+    plans: PLAN_LIMITS
   };
 }
 

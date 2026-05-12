@@ -581,11 +581,13 @@ function plans(data: any) {
       ${planNotice}
       <div class="plan-cta">
         <div>
-          <strong>${inactivePlan ? "Choose a plan to activate ShipRelease" : `You're on ${data.currentPlan}`}</strong>
+          <strong>${inactivePlan ? "Choose a plan to activate ShipRelease" : `You’re on ${data.currentPlan}`}</strong>
           <span>${inactivePlan ? "Select a Shopify Managed Pricing plan to start releasing orders." : "Manage billing, plan changes, and cancellation in Shopify."}</span>
-          <small>You’ll be redirected to Shopify to confirm or manage your plan.</small>
+          <p class="plan-manage-instruction">Choose or manage your plan from the app listing or Shopify app billing settings.</p>
         </div>
-        <a class="button primary" href="${data.manageUrl}" target="_top" rel="noopener noreferrer">${inactivePlan ? "Choose a plan in Shopify" : "Manage plan in Shopify"}</a>
+      </div>
+      <div class="plan-reviewer-note">
+        <strong>App reviewer note:</strong> Plans are managed by Shopify. If you are reviewing the app and cannot select a plan, you can still test all core features.
       </div>
       <div class="plan-grid">${planRows}</div>
       <div class="actions"><button class="secondary" type="button" id="refresh-plan">Refresh plan status</button></div>
