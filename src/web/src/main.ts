@@ -582,9 +582,9 @@ function plans(data: any) {
       <div class="plan-cta">
         <div>
           <strong>${inactivePlan ? "Choose a plan to activate ShipRelease" : `You’re on ${data.currentPlan}`}</strong>
-          <span>${inactivePlan ? "Select a Shopify Managed Pricing plan to start releasing orders." : "Manage billing, plan changes, and cancellation in Shopify."}</span>
-          <p class="plan-manage-instruction">Choose or manage your plan from the app listing or Shopify app billing settings.</p>
+          <span>Plans are managed by Shopify Managed Pricing. You can choose or manage your plan from Shopify app billing settings.</span>
         </div>
+        <a class="button secondary" href="${data.billingSettingsUrl}" target="_blank" rel="noopener noreferrer">Open Shopify billing settings</a>
       </div>
       <div class="plan-reviewer-note">
         <strong>App reviewer note:</strong> Plans are managed by Shopify. If you are reviewing the app and cannot select a plan, you can still test all core features.
