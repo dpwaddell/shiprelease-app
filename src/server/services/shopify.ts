@@ -27,6 +27,44 @@ function base64url(input: Buffer | string) {
   return Buffer.from(input).toString("base64url");
 }
 
+async function fetchMerchantContact(shopDomain: string, accessToken: string) {
+  if (!shopDomain || !accessToken) return {};
+
+  try {
+    const response = await fetch(`https://${shopDomain}/admin/api/2026-04/graphql.json`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": accessToken
+      },
+      body: JSON.stringify({
+        query: `#graphql
+          query {
+            shop {
+              email
+              contactEmail
+              shopOwnerName
+              name
+            }
+          }
+        `
+      })
+    });
+
+    const json = await response.json() as any;
+    const shop = json?.data?.shop || {};
+
+    return {
+      merchantEmail: shop.email || null,
+      merchantContactEmail: shop.contactEmail || null,
+      shopOwnerName: shop.shopOwnerName || null
+    };
+  } catch (error) {
+    console.warn("merchant contact fetch failed", shopDomain, error);
+    return {};
+  }
+}
+
 export function beginOAuth(req: Request, res: Response) {
   const shop = normalizeShopDomain(String(req.query.shop || ""));
   const state = crypto.randomBytes(16).toString("hex");
@@ -65,6 +103,8 @@ export async function finishOAuth(req: Request, res: Response) {
   if (!tokenResponse.ok) return res.status(502).send("OAuth token exchange failed");
   const token = await tokenResponse.json() as { access_token: string; scope: string };
 
+  const merchant = await fetchMerchantContact(shop, token.access_token);
+
   const existing = await prisma.shop.findUnique({ where: { domain: shop }, select: { id: true, uninstalledAt: true } });
   const record = await prisma.shop.upsert({
     where: { domain: shop },
@@ -72,12 +112,20 @@ export async function finishOAuth(req: Request, res: Response) {
       accessToken: token.access_token,
       scope: token.scope,
       installedAt: new Date(),
-      uninstalledAt: null
+      uninstalledAt: null,
+      ...merchant,
+      ...((merchant as any).merchantEmail || (merchant as any).merchantContactEmail || (merchant as any).shopOwnerName
+        ? { merchantDetailsCapturedAt: new Date() }
+        : {})
     },
     create: {
       domain: shop,
       accessToken: token.access_token,
-      scope: token.scope
+      scope: token.scope,
+      ...merchant,
+      ...((merchant as any).merchantEmail || (merchant as any).merchantContactEmail || (merchant as any).shopOwnerName
+        ? { merchantDetailsCapturedAt: new Date() }
+        : {})
     }
   });
   console.log("SHOP_ROW_CREATED_OR_UPDATED_AFTER_OAUTH", JSON.stringify({

@@ -10,6 +10,10 @@ datasource db {
 model Shop {
   id                           String                 @id @default(cuid())
   domain                       String                 @unique
+  merchantEmail                String?                @map("merchant_email")
+  merchantContactEmail         String?                @map("merchant_contact_email")
+  shopOwnerName                String?                @map("shop_owner_name")
+  merchantDetailsCapturedAt    DateTime?              @map("merchant_details_captured_at")
   accessToken                  String                 @map("access_token")
   scope                        String
   installedAt                  DateTime               @default(now()) @map("installed_at")
